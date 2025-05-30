@@ -1,0 +1,71 @@
+---
+# SUSE family specific tasks (openSUSE)
+- name: Install automatic updates packages
+  package:
+    name:
+      - zypper
+      - cron
+    state: present
+  tags:
+    - auto-updates
+    - install
+
+- name: Configure zypper automatic updates exclusions
+  lineinfile:
+    path: /etc/zypp/zypp.conf
+    regexp: '^solver.onlyRequires'
+    line: "solver.onlyRequires = true"
+    backup: true
+  when: update_exclude_packages is defined and update_exclude_packages | length > 0
+  tags:
+    - auto-updates
+    - config
+
+- name: Create zypper automatic update script
+  copy:
+    content: |
+      #!/bin/bash
+      # Automatic zypper update script
+      
+      EXCLUDE_PACKAGES="{{ update_exclude_packages | join(' ') }}"
+      
+      if [ -n "$EXCLUDE_PACKAGES" ]; then
+          /usr/bin/zypper --non-interactive update --auto-agree-with-licenses \
+            $(echo $EXCLUDE_PACKAGES | sed 's/\([^ ]*\)/--skip-package \1/g')
+      else
+          /usr/bin/zypper --non-interactive update --auto-agree-with-licenses
+      fi
+    dest: /usr/local/bin/zypper-auto-update.sh
+    owner: root
+    group: root
+    mode: '0755'
+    backup: true
+  tags:
+    - auto-updates
+    - config
+
+- name: Configure cron job for automatic updates
+  cron:
+    name: "Automatic zypper updates"
+    minute: "0"
+    hour: "{{ update_schedule.split(':')[0] }}"
+    job: "/usr/local/bin/zypper-auto-update.sh"
+    user: root
+    state: "{{ 'present' if auto_updates_enabled else 'absent' }}"
+  tags:
+    - auto-updates
+    - schedule
+
+- name: Enable and start cron service
+  systemd:
+    name: cron
+    enabled: true
+    state: started
+  when: auto_updates_enabled | bool
+  tags:
+    - auto-updates
+    - service
+
+- name: Set service name for verification
+  set_fact:
+    auto_updates_service_name: "cron"

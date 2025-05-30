@@ -1,0 +1,29 @@
+---
+# Tasks file for sample-role
+
+- name: Include OS-specific variables
+  include_vars: '{{ ansible_os_family }}.yml'
+  tags:
+    - sample-role
+    - configuration
+
+- name: Ensure required packages are installed
+  package:
+    name: '{{ item }}'
+    state: present
+  loop: '{{ required_packages | default([]) }}'
+  tags:
+    - sample-role
+    - packages
+
+- name: Configure service
+  template:
+    src: config.j2
+    dest: /etc/sample/config.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart sample service
+  tags:
+    - sample-role
+    - configuration

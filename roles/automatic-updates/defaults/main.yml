@@ -1,0 +1,9 @@
+---
+# defaults file for roles/automatic-updates
+update_schedule: "03:00"
+update_exclude_packages: []
+auto_updates_enabled: true
+auto_updates_download_only: false
+auto_updates_apply_updates: true
+auto_updates_reboot: false
+auto_updates_email_to: ""

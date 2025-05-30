@@ -1,0 +1,75 @@
+---
+# RedHat family specific tasks (RHEL, CentOS, AlmaLinux, OracleLinux)
+- name: Install dnf-automatic package
+  package:
+    name: dnf-automatic
+    state: present
+  tags:
+    - auto-updates
+    - install
+
+- name: Configure dnf-automatic
+  template:
+    src: dnf-automatic.conf.j2
+    dest: /etc/dnf/automatic.conf
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  notify:
+    - restart dnf-automatic
+  tags:
+    - auto-updates
+    - config
+
+- name: Configure package exclusions in dnf.conf
+  lineinfile:
+    path: /etc/dnf/dnf.conf
+    regexp: '^exclude='
+    line: "exclude={{ update_exclude_packages | join(' ') }}"
+    state: "{{ 'present' if update_exclude_packages else 'absent' }}"
+    backup: true
+  when: update_exclude_packages is defined and update_exclude_packages | length > 0
+  tags:
+    - auto-updates
+    - config
+
+- name: Configure dnf-automatic timer schedule
+  lineinfile:
+    path: /etc/systemd/system/dnf-automatic.timer.d/override.conf
+    regexp: '^OnCalendar='
+    line: "OnCalendar=*-*-* {{ update_schedule }}:00"
+    create: true
+    backup: true
+  notify:
+    - reload systemd
+    - restart dnf-automatic-timer
+  tags:
+    - auto-updates
+    - schedule
+
+- name: Create systemd override directory for dnf-automatic timer
+  file:
+    path: /etc/systemd/system/dnf-automatic.timer.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  tags:
+    - auto-updates
+    - config
+
+- name: Enable and start dnf-automatic timer
+  systemd:
+    name: dnf-automatic.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: auto_updates_enabled | bool
+  tags:
+    - auto-updates
+    - service
+
+- name: Set service name for verification
+  set_fact:
+    auto_updates_service_name: "dnf-automatic.timer"

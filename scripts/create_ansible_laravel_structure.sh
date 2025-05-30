@@ -175,6 +175,15 @@ create_file ".gitignore" "# Ansible files
 .ansible_cache/
 .ansible_facts/
 
+# Inventory files (contain sensitive host information)
+inventory/*.yml
+inventory/*/*.yml
+inventory/*.ini
+inventory/*/*.ini
+inventory/*.json
+inventory/*/*.json
+!inventory/development/hosts-sample.yml
+
 # Vault passwords
 .vault_pass
 .vault_pass.txt
@@ -220,10 +229,8 @@ tower-cli.cfg
 
 # Downloaded roles
 galaxy_roles/
-roles/*
-!roles/.gitkeep
-!roles/requirements.yml
-!roles/ansible-updates/
+!roles/
+!roles/**
 
 # Terraform
 *.tfstate

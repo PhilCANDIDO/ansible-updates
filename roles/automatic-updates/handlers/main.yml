@@ -1,0 +1,28 @@
+---
+# handlers file for roles/automatic-updates
+- name: restart dnf-automatic
+  systemd:
+    name: dnf-automatic.timer
+    state: restarted
+    daemon_reload: true
+
+- name: restart dnf-automatic-timer
+  systemd:
+    name: dnf-automatic.timer
+    state: restarted
+    daemon_reload: true
+
+- name: restart unattended-upgrades
+  systemd:
+    name: unattended-upgrades
+    state: restarted
+
+- name: restart apt-daily-timer
+  systemd:
+    name: apt-daily.timer
+    state: restarted
+    daemon_reload: true
+
+- name: reload systemd
+  systemd:
+    daemon_reload: true

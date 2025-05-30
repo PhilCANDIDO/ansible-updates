@@ -1,0 +1,46 @@
+---
+# tasks file for roles/automatic-updates
+- name: Include OS-specific variables
+  include_vars: "{{ ansible_os_family }}.yml"
+  ignore_errors: true
+  tags:
+    - auto-updates
+    - config
+
+- name: Debug detected OS family
+  debug:
+    msg: "Detected OS family: {{ ansible_os_family }}, Distribution: {{ ansible_distribution }}"
+  tags:
+    - auto-updates
+    - debug
+
+- name: Include RedHat family tasks
+  include_tasks: redhat.yml
+  when: ansible_os_family == "RedHat"
+  tags:
+    - auto-updates
+    - redhat
+
+- name: Include Debian family tasks
+  include_tasks: debian.yml
+  when: ansible_os_family == "Debian"
+  tags:
+    - auto-updates
+    - debian
+
+- name: Include SUSE family tasks
+  include_tasks: suse.yml
+  when: ansible_os_family == "Suse"
+  tags:
+    - auto-updates
+    - suse
+
+- name: Verify automatic updates service status
+  service:
+    name: "{{ auto_updates_service_name }}"
+    state: started
+    enabled: true
+  when: auto_updates_service_name is defined
+  tags:
+    - auto-updates
+    - verify
