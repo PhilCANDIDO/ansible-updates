@@ -10,7 +10,7 @@ inventory/*.ini
 inventory/*/*.ini
 inventory/*.json
 inventory/*/*.json
-!inventory/development/hosts-sample.yml
+!inventory/development/hosts_sample.yml
 
 # Vault passwords
 .vault_pass
