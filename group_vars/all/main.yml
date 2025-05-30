@@ -1,0 +1,20 @@
+---
+# Global variables for all hosts
+
+# Common packages to install
+common_packages:
+  - vim
+  - htop
+  - curl
+  - wget
+  - git
+
+# Timezone configuration
+timezone: UTC
+
+# SSH configuration
+ssh_port: 22
+ssh_permit_root_login: 'no'
+
+# Update configuration
+automatic_updates_enabled: true

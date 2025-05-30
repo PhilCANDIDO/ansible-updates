@@ -1,159 +1,64 @@
-# vscode folder
-.vscode/
-
-# Ansible retry files
+# Ansible files
 *.retry
-
-# Ansible facts cache
+.ansible_cache/
 .ansible_facts/
-.facts/
 
-# Ansible Galaxy roles
-roles/*
-!roles/requirements.yml
-!roles/ansible-updates/
-
-# Ansible Vault password files
+# Vault passwords
 .vault_pass
 .vault_pass.txt
-vault_pass
-vault_pass.txt
+vault_pass*
 *.vault
 
-# Ansible log files
-*.log
-ansible.log
-
-# Python bytecode
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.pyc
-*.pyo
-
-# Virtual environments
 venv/
-env/
-ENV/
-.venv/
 .env
 
-# IDE and editor files
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-.project
-.settings/
-*.sublime-project
-*.sublime-workspace
 .DS_Store
 
-# Temporary files
+# Logs and temp files
+*.log
 *.tmp
-*.temp
 *.bak
-*.backup
 *.orig
-.cache/
 
-# Test and coverage files
-.coverage
-.pytest_cache/
-.tox/
-htmlcov/
-*.cover
-.hypothesis/
-
-# Documentation build files
-docs/_build/
-docs/_static/
-docs/_templates/
-site/
-
-# Molecule testing
-.molecule/
-molecule/*/.molecule/
-molecule/*/tests/__pycache__/
-
-# Terraform files (if using for infrastructure)
-*.tfstate
-*.tfstate.*
-.terraform/
-.terraform.lock.hcl
-
-# SSH keys and certificates
+# SSH keys
 *.pem
 *.key
-*.pub
-id_rsa
-id_rsa.pub
-id_dsa
-id_dsa.pub
-*.crt
-*.csr
+id_rsa*
+id_dsa*
 
-# Configuration files with sensitive data
-**/group_vars/*/vault.yml
-**/host_vars/*/vault.yml
-secrets/
-private/
+# Test files
+.molecule/
+.pytest_cache/
+.coverage
 
-# Inventory files with sensitive data
-inventory/production
-inventory/staging
-!inventory/example
-!inventory/README.md
-
-# AWX/Tower artifacts
-awx-manage-db-*
+# AWX/Tower
 tower-cli.cfg
 .tower_cli.cfg
 
-# Ansible Collections build artifacts
-*.tar.gz
-ansible_collections/
-
-# OS generated files
-Thumbs.db
-.directory
-
-# Backup files
-backup/
-backups/
-
-# Custom configuration files that might contain sensitive data
-custom.yml
-local.yml
-!example.custom.yml
-!example.local.yml
-
-# Ansible run artifacts
-artifacts/
-
-# Ignore everything in vars except examples
-vars/*
-!vars/example.yml
-!vars/README.md
-
-# Ignore actual inventory but keep examples
-inventory/*
-!inventory/example/
-!inventory/inventory.example
-
-# Keep the role structure but ignore downloaded roles
-roles/*/
-!roles/ansible-updates/
+# Downloaded roles
+galaxy_roles/
+roles/*
 !roles/.gitkeep
+!roles/requirements.yml
+!roles/ansible-updates/
 
-# Ignore any files containing passwords or secrets
-*password*
-*secret*
-!*example*password*
-!*example*secret*
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
 
-# Ignore local test files
-test-*.yml
-test-*.yaml
-!test-example.yml
+# Custom
+local/
+private/
+secrets/

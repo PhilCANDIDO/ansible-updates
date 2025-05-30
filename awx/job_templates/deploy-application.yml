@@ -1,0 +1,33 @@
+---
+# AWX Job Template Configuration
+name: Deploy Application
+description: Deploy application to target environment
+job_type: run
+inventory: Production Inventory
+project: Infrastructure Automation
+playbook: playbooks/deploy-application.yml
+credentials:
+  - Production SSH Key
+  - Vault Password
+extra_vars:
+  deployment_version: '{{ deployment_version }}'
+  environment: '{{ target_environment }}'
+ask_variables_on_launch: true
+survey_enabled: true
+survey_spec:
+  name: Deployment Survey
+  description: Deployment configuration options
+  spec:
+    - variable: deployment_version
+      question_name: Application Version
+      type: text
+      required: true
+      default: latest
+    - variable: target_environment
+      question_name: Target Environment
+      type: multiplechoice
+      required: true
+      choices:
+        - production
+        - staging
+      default: staging

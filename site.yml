@@ -1,0 +1,43 @@
+---
+# Main Ansible Playbook
+# This is the entry point for your infrastructure automation
+
+- name: Common configuration for all hosts
+  hosts: all
+  gather_facts: yes
+  become: yes
+  tags:
+    - common
+  roles: []
+    # - common
+    # - security
+
+- name: Configure web servers
+  hosts: webservers
+  gather_facts: yes
+  become: yes
+  tags:
+    - web
+  roles: []
+    # - nginx
+    # - php
+
+- name: Configure database servers
+  hosts: databases
+  gather_facts: yes
+  become: yes
+  tags:
+    - db
+  roles: []
+    # - postgresql
+    # - mysql
+
+- name: Configure application servers
+  hosts: appservers
+  gather_facts: yes
+  become: yes
+  tags:
+    - app
+  roles: []
+    # - docker
+    # - kubernetes
