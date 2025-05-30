@@ -1,12 +1,5 @@
 ---
 # tasks file for roles/automatic-updates
-- name: Include OS-specific variables
-  include_vars: "{{ ansible_os_family }}.yml"
-  ignore_errors: true
-  tags:
-    - auto-updates
-    - config
-
 - name: Debug detected OS family
   debug:
     msg: "Detected OS family: {{ ansible_os_family }}, Distribution: {{ ansible_distribution }}"
@@ -40,7 +33,9 @@
     name: "{{ auto_updates_service_name }}"
     state: started
     enabled: true
-  when: auto_updates_service_name is defined
+  when: 
+    - auto_updates_service_name is defined
+    - auto_updates_enabled | bool
   tags:
     - auto-updates
     - verify

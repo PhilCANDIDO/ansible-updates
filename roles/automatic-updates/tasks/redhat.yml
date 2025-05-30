@@ -8,6 +8,17 @@
     - auto-updates
     - install
 
+- name: Create systemd override directory for dnf-automatic timer
+  file:
+    path: /etc/systemd/system/dnf-automatic.timer.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  tags:
+    - auto-updates
+    - config
+
 - name: Configure dnf-automatic
   template:
     src: dnf-automatic.conf.j2
@@ -27,19 +38,26 @@
     path: /etc/dnf/dnf.conf
     regexp: '^exclude='
     line: "exclude={{ update_exclude_packages | join(' ') }}"
-    state: "{{ 'present' if update_exclude_packages else 'absent' }}"
+    state: "{{ 'present' if (update_exclude_packages is defined and update_exclude_packages | length > 0) else 'absent' }}"
     backup: true
-  when: update_exclude_packages is defined and update_exclude_packages | length > 0
   tags:
     - auto-updates
     - config
 
 - name: Configure dnf-automatic timer schedule
-  lineinfile:
-    path: /etc/systemd/system/dnf-automatic.timer.d/override.conf
-    regexp: '^OnCalendar='
-    line: "OnCalendar=*-*-* {{ update_schedule }}:00"
-    create: true
+  copy:
+    content: |
+      [Timer]
+      OnCalendar=*-*-* {{ update_schedule }}:00
+      RandomizedDelaySec=0
+      Persistent=true
+      
+      [Install]
+      WantedBy=timers.target
+    dest: /etc/systemd/system/dnf-automatic.timer.d/override.conf
+    owner: root
+    group: root
+    mode: '0644'
     backup: true
   notify:
     - reload systemd
@@ -48,17 +66,6 @@
     - auto-updates
     - schedule
 
-- name: Create systemd override directory for dnf-automatic timer
-  file:
-    path: /etc/systemd/system/dnf-automatic.timer.d
-    state: directory
-    owner: root
-    group: root
-    mode: '0755'
-  tags:
-    - auto-updates
-    - config
-
 - name: Enable and start dnf-automatic timer
   systemd:
     name: dnf-automatic.timer
@@ -66,6 +73,16 @@
     state: started
     daemon_reload: true
   when: auto_updates_enabled | bool
+  tags:
+    - auto-updates
+    - service
+
+- name: Disable dnf-automatic timer when updates disabled
+  systemd:
+    name: dnf-automatic.timer
+    enabled: false
+    state: stopped
+  when: not (auto_updates_enabled | bool)
   tags:
     - auto-updates
     - service

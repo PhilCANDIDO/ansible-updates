@@ -18,6 +18,17 @@
     - auto-updates
     - install
 
+- name: Create systemd override directory for apt-daily timer
+  file:
+    path: /etc/systemd/system/apt-daily.timer.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  tags:
+    - auto-updates
+    - config
+
 - name: Configure automatic updates
   template:
     src: 20auto-upgrades.j2
@@ -47,11 +58,19 @@
     - config
 
 - name: Configure apt-daily timer schedule
-  lineinfile:
-    path: /etc/systemd/system/apt-daily.timer.d/override.conf
-    regexp: '^OnCalendar='
-    line: "OnCalendar=*-*-* {{ update_schedule }}:00"
-    create: true
+  copy:
+    content: |
+      [Timer]
+      OnCalendar=*-*-* {{ update_schedule }}:00
+      RandomizedDelaySec=0
+      Persistent=true
+      
+      [Install]
+      WantedBy=timers.target
+    dest: /etc/systemd/system/apt-daily.timer.d/override.conf
+    owner: root
+    group: root
+    mode: '0644'
     backup: true
   notify:
     - reload systemd
@@ -59,17 +78,6 @@
   tags:
     - auto-updates
     - schedule
-
-- name: Create systemd override directory for apt-daily timer
-  file:
-    path: /etc/systemd/system/apt-daily.timer.d
-    state: directory
-    owner: root
-    group: root
-    mode: '0755'
-  tags:
-    - auto-updates
-    - config
 
 - name: Enable and start unattended-upgrades service
   systemd:
@@ -89,6 +97,19 @@
     state: started
     daemon_reload: true
   when: auto_updates_enabled | bool
+  tags:
+    - auto-updates
+    - service
+
+- name: Disable services when updates disabled
+  systemd:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop:
+    - unattended-upgrades
+    - apt-daily.timer
+  when: not (auto_updates_enabled | bool)
   tags:
     - auto-updates
     - service

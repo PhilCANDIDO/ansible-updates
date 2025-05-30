@@ -1,0 +1,11 @@
+#!/bin/bash
+# Automatic zypper update script
+
+EXCLUDE_PACKAGES="{{ update_exclude_packages | join(' ') }}"
+
+if [ -n "$EXCLUDE_PACKAGES" ]; then
+    /usr/bin/zypper --non-interactive update --auto-agree-with-licenses \
+      $(echo $EXCLUDE_PACKAGES | sed 's/\([^ ]*\)/--skip-package \1/g')
+else
+    /usr/bin/zypper --non-interactive update --auto-agree-with-licenses
+fi
