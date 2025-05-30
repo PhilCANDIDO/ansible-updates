@@ -1,0 +1,13 @@
+---
+- name: Configure automatic updates
+  hosts: all
+  become: true
+  vars:
+    update_schedule: "03:00"
+    auto_updates_enabled: true
+    auto_updates_apply_updates: true
+    auto_updates_reboot: false
+    auto_updates_email_to: "support@emerging-it.fr"
+  
+  roles:
+    - automatic-updates
