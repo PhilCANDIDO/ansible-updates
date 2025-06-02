@@ -1,4 +1,3 @@
-# Chemin: roles/automatic-updates/tasks/redhat-fallback.yml
 ---
 # Fallback installation method for RHEL systems with strict exclusions
 
@@ -8,6 +7,7 @@
     state: present
     disable_excludes: all
   when: ansible_pkg_mgr == "yum"
+  ignore_errors: true
   tags:
     - auto-updates
     - install
@@ -21,6 +21,7 @@
   args:
     creates: /usr/bin/dnf-automatic
   when: ansible_pkg_mgr == "dnf"
+  ignore_errors: true
   tags:
     - auto-updates
     - install

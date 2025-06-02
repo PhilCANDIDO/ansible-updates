@@ -1,45 +1,61 @@
 ---
 # RedHat family specific tasks (RHEL, CentOS, AlmaLinux, OracleLinux)
 
-- name: (redhat) Check current DNF exclusions
-  shell: dnf config-manager --dump | grep -E '^exclude\s*=' || echo "exclude="
-  register: current_dnf_excludes
-  changed_when: false
-  failed_when: false
-  tags:
-    - auto-updates
-    - install
+- name: (redhat) Install dnf-automatic package with fallback handling
+  block:
+    - name: (redhat) Check current DNF exclusions
+      shell: dnf config-manager --dump | grep -E '^exclude\s*=' || echo "exclude="
+      register: current_dnf_excludes
+      changed_when: false
+      failed_when: false
+      tags:
+        - auto-updates
+        - install
 
-- name: (redhat) Temporarily disable dnf-automatic exclusion for installation
-  lineinfile:
-    path: /etc/dnf/dnf.conf
-    regexp: '^exclude='
-    line: "exclude={{ current_dnf_excludes.stdout.split('=')[1] | regex_replace('dnf-automatic[*]?', '') | regex_replace('\\s+', ' ') | trim }}"
-    backup: true
-  when: 
-    - current_dnf_excludes.stdout is defined
-    - "'dnf-automatic' in current_dnf_excludes.stdout"
-  register: temporary_exclude_change
-  tags:
-    - auto-updates
-    - install
+    - name: (redhat) Temporarily disable dnf-automatic exclusion for installation
+      lineinfile:
+        path: /etc/dnf/dnf.conf
+        regexp: '^exclude='
+        line: "exclude={{ current_dnf_excludes.stdout.split('=')[1] | regex_replace('dnf-automatic[*]?', '') | regex_replace('\\s+', ' ') | trim }}"
+        backup: true
+      when: 
+        - current_dnf_excludes.stdout is defined
+        - "'dnf-automatic' in current_dnf_excludes.stdout"
+      register: temporary_exclude_change
 
-- name: (redhat) Install dnf-automatic package
-  package:
-    name: dnf-automatic
-    state: present
-    disable_excludes: all
-  tags:
-    - auto-updates
-    - install
+    - name: (redhat) Install dnf-automatic package
+      package:
+        name: dnf-automatic
+        state: present
+        disable_excludes: all
 
-- name: (redhat) Restore original DNF exclusions after installation
-  lineinfile:
-    path: /etc/dnf/dnf.conf
-    regexp: '^exclude='
-    line: "{{ current_dnf_excludes.stdout }}"
-    backup: true
-  when: temporary_exclude_change is defined and temporary_exclude_change.changed
+    - name: (redhat) Restore original DNF exclusions after installation
+      lineinfile:
+        path: /etc/dnf/dnf.conf
+        regexp: '^exclude='
+        line: "{{ current_dnf_excludes.stdout }}"
+        backup: true
+      when: temporary_exclude_change is defined and temporary_exclude_change.changed
+
+  rescue:
+    - name: (redhat) Try installing dnf-automatic with yum (fallback)
+      yum:
+        name: dnf-automatic
+        state: present
+        disable_excludes: all
+      when: ansible_pkg_mgr == "yum"
+      ignore_errors: true
+
+    - name: (redhat) Install dnf-automatic using rpm (last resort)
+      shell: |
+        dnf download dnf-automatic --downloadonly --downloaddir=/tmp/
+        rpm -Uvh --force /tmp/dnf-automatic*.rpm
+        rm -f /tmp/dnf-automatic*.rpm
+      args:
+        creates: /usr/bin/dnf-automatic
+      when: ansible_pkg_mgr == "dnf"
+      ignore_errors: true
+
   tags:
     - auto-updates
     - install

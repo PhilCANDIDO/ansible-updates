@@ -7,15 +7,8 @@
     - auto-updates
     - debug
 
-- name: (main) Handle RedHat family tasks with fallback
-  block:
-    - name: (main) Include RedHat family tasks
-      include_tasks: redhat.yml
-      when: ansible_os_family == "RedHat"
-  rescue:
-    - name: (main) Try RedHat fallback installation method
-      include_tasks: redhat-fallback.yml
-      when: ansible_os_family == "RedHat"
+- name: (main) Include RedHat family tasks
+  include_tasks: redhat.yml
   when: ansible_os_family == "RedHat"
   tags:
     - auto-updates
