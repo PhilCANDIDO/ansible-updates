@@ -1,4 +1,3 @@
-# Chemin: roles/automatic-updates/tasks/redhat.yml
 ---
 # RedHat family specific tasks (RHEL, CentOS, AlmaLinux, OracleLinux)
 
@@ -6,6 +5,7 @@
   shell: dnf config-manager --dump | grep -E '^exclude\s*=' || echo "exclude="
   register: current_dnf_excludes
   changed_when: false
+  failed_when: false
   tags:
     - auto-updates
     - install
@@ -76,7 +76,9 @@
     line: "exclude={{ (current_dnf_excludes.stdout.split('=')[1].split() + update_exclude_packages) | unique | join(' ') }}"
     state: "{{ 'present' if (update_exclude_packages is defined and update_exclude_packages | length > 0) else 'absent' }}"
     backup: true
-  when: current_dnf_excludes.stdout is defined
+  when: 
+    - current_dnf_excludes.stdout is defined
+    - current_dnf_excludes.stdout != "exclude="
   tags:
     - auto-updates
     - config
@@ -89,7 +91,8 @@
     state: present
     backup: true
   when: 
-    - current_dnf_excludes.stdout is not defined or 'exclude=' not in current_dnf_excludes.stdout
+    - current_dnf_excludes.stdout is defined
+    - current_dnf_excludes.stdout == "exclude="
     - update_exclude_packages is defined 
     - update_exclude_packages | length > 0
   tags:
@@ -100,6 +103,7 @@
   copy:
     content: |
       [Timer]
+      OnCalendar=
       OnCalendar=*-*-* {{ update_schedule }}:00
       RandomizedDelaySec=0
       Persistent=true

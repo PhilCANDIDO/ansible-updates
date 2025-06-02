@@ -1,6 +1,6 @@
 ---
 # SUSE family specific tasks (openSUSE)
-- name: Install automatic updates packages
+- name: (suse) Install automatic updates packages
   package:
     name:
       - zypper
@@ -10,7 +10,7 @@
     - auto-updates
     - install
 
-- name: Configure zypper automatic updates exclusions
+- name: (suse) Configure zypper automatic updates exclusions
   lineinfile:
     path: /etc/zypp/zypp.conf
     regexp: '^solver.onlyRequires'
@@ -21,7 +21,7 @@
     - auto-updates
     - config
 
-- name: Create zypper automatic update script
+- name: (suse) Create zypper automatic update script
   template:
     src: zypper-auto-update.sh.j2
     dest: /usr/local/bin/zypper-auto-update.sh
@@ -33,7 +33,7 @@
     - auto-updates
     - config
 
-- name: Configure cron job for automatic updates
+- name: (suse) Configure cron job for automatic updates
   cron:
     name: "Automatic zypper updates"
     minute: "0"
@@ -45,7 +45,7 @@
     - auto-updates
     - schedule
 
-- name: Enable and start cron service
+- name: (suse) Enable and start cron service
   systemd:
     name: cron
     enabled: true
@@ -55,6 +55,6 @@
     - auto-updates
     - service
 
-- name: Set service name for verification
+- name: (suse) Set service name for verification
   set_fact:
     auto_updates_service_name: "cron"

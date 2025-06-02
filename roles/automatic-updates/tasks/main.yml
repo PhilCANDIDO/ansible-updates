@@ -1,4 +1,3 @@
-# Chemin: roles/automatic-updates/tasks/main.yml
 ---
 # tasks file for roles/automatic-updates
 - name: (main) Debug detected OS family
@@ -8,13 +7,16 @@
     - auto-updates
     - debug
 
-- name: (main) Include RedHat family tasks
-  include_tasks: redhat.yml
-  when: ansible_os_family == "RedHat"
+- name: (main) Handle RedHat family tasks with fallback
+  block:
+    - name: (main) Include RedHat family tasks
+      include_tasks: redhat.yml
+      when: ansible_os_family == "RedHat"
   rescue:
-    - name: Try RedHat fallback installation method
+    - name: (main) Try RedHat fallback installation method
       include_tasks: redhat-fallback.yml
       when: ansible_os_family == "RedHat"
+  when: ansible_os_family == "RedHat"
   tags:
     - auto-updates
     - redhat
