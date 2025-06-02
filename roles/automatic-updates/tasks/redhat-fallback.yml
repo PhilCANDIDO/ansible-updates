@@ -1,0 +1,27 @@
+# Chemin: roles/automatic-updates/tasks/redhat-fallback.yml
+---
+# Fallback installation method for RHEL systems with strict exclusions
+
+- name: (redhat-fallback) Try installing dnf-automatic with yum (fallback)
+  yum:
+    name: dnf-automatic
+    state: present
+    disable_excludes: all
+  when: ansible_pkg_mgr == "yum"
+  tags:
+    - auto-updates
+    - install
+    - fallback
+
+- name: (redhat-fallback) Install dnf-automatic using rpm (last resort)
+  shell: |
+    dnf download dnf-automatic --downloadonly --downloaddir=/tmp/
+    rpm -Uvh --force /tmp/dnf-automatic*.rpm
+    rm -f /tmp/dnf-automatic*.rpm
+  args:
+    creates: /usr/bin/dnf-automatic
+  when: ansible_pkg_mgr == "dnf"
+  tags:
+    - auto-updates
+    - install
+    - fallback

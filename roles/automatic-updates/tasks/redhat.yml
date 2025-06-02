@@ -1,14 +1,50 @@
+# Chemin: roles/automatic-updates/tasks/redhat.yml
 ---
 # RedHat family specific tasks (RHEL, CentOS, AlmaLinux, OracleLinux)
-- name: Install dnf-automatic package
-  package:
-    name: dnf-automatic
-    state: present
+
+- name: (redhat) Check current DNF exclusions
+  shell: dnf config-manager --dump | grep -E '^exclude\s*=' || echo "exclude="
+  register: current_dnf_excludes
+  changed_when: false
   tags:
     - auto-updates
     - install
 
-- name: Create systemd override directory for dnf-automatic timer
+- name: (redhat) Temporarily disable dnf-automatic exclusion for installation
+  lineinfile:
+    path: /etc/dnf/dnf.conf
+    regexp: '^exclude='
+    line: "exclude={{ current_dnf_excludes.stdout.split('=')[1] | regex_replace('dnf-automatic[*]?', '') | regex_replace('\\s+', ' ') | trim }}"
+    backup: true
+  when: 
+    - current_dnf_excludes.stdout is defined
+    - "'dnf-automatic' in current_dnf_excludes.stdout"
+  register: temporary_exclude_change
+  tags:
+    - auto-updates
+    - install
+
+- name: (redhat) Install dnf-automatic package
+  package:
+    name: dnf-automatic
+    state: present
+    disable_excludes: all
+  tags:
+    - auto-updates
+    - install
+
+- name: (redhat) Restore original DNF exclusions after installation
+  lineinfile:
+    path: /etc/dnf/dnf.conf
+    regexp: '^exclude='
+    line: "{{ current_dnf_excludes.stdout }}"
+    backup: true
+  when: temporary_exclude_change is defined and temporary_exclude_change.changed
+  tags:
+    - auto-updates
+    - install
+
+- name: (redhat) Create systemd override directory for dnf-automatic timer
   file:
     path: /etc/systemd/system/dnf-automatic.timer.d
     state: directory
@@ -19,7 +55,7 @@
     - auto-updates
     - config
 
-- name: Configure dnf-automatic
+- name: (redhat) Configure dnf-automatic
   template:
     src: dnf-automatic.conf.j2
     dest: /etc/dnf/automatic.conf
@@ -33,18 +69,34 @@
     - auto-updates
     - config
 
-- name: Configure package exclusions in dnf.conf
+- name: (redhat) Configure package exclusions in dnf.conf
   lineinfile:
     path: /etc/dnf/dnf.conf
     regexp: '^exclude='
-    line: "exclude={{ update_exclude_packages | join(' ') }}"
+    line: "exclude={{ (current_dnf_excludes.stdout.split('=')[1].split() + update_exclude_packages) | unique | join(' ') }}"
     state: "{{ 'present' if (update_exclude_packages is defined and update_exclude_packages | length > 0) else 'absent' }}"
     backup: true
+  when: current_dnf_excludes.stdout is defined
   tags:
     - auto-updates
     - config
 
-- name: Configure dnf-automatic timer schedule
+- name: (redhat) Add package exclusions to dnf.conf (if no existing exclusions)
+  lineinfile:
+    path: /etc/dnf/dnf.conf
+    regexp: '^exclude='
+    line: "exclude={{ update_exclude_packages | join(' ') }}"
+    state: present
+    backup: true
+  when: 
+    - current_dnf_excludes.stdout is not defined or 'exclude=' not in current_dnf_excludes.stdout
+    - update_exclude_packages is defined 
+    - update_exclude_packages | length > 0
+  tags:
+    - auto-updates
+    - config
+
+- name: (redhat) Configure dnf-automatic timer schedule
   copy:
     content: |
       [Timer]
@@ -66,7 +118,7 @@
     - auto-updates
     - schedule
 
-- name: Enable and start dnf-automatic timer
+- name: (redhat) Enable and start dnf-automatic timer
   systemd:
     name: dnf-automatic.timer
     enabled: true
@@ -77,7 +129,7 @@
     - auto-updates
     - service
 
-- name: Disable dnf-automatic timer when updates disabled
+- name: (redhat) Disable dnf-automatic timer when updates disabled
   systemd:
     name: dnf-automatic.timer
     enabled: false
@@ -87,6 +139,6 @@
     - auto-updates
     - service
 
-- name: Set service name for verification
+- name: (redhat) Set service name for verification
   set_fact:
     auto_updates_service_name: "dnf-automatic.timer"
