@@ -61,6 +61,7 @@
   copy:
     content: |
       [Timer]
+      OnCalendar=
       OnCalendar=*-*-* {{ update_schedule }}:00
       RandomizedDelaySec=0
       Persistent=true
