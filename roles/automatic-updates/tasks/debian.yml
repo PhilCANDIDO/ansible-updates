@@ -132,3 +132,50 @@
 - name: (debian) Set service name for verification
   set_fact:
     auto_updates_service_name: "unattended-upgrades"
+
+- name: (debian) Create systemd override directory for apt-daily-upgrade timer
+  file:
+    path: /etc/systemd/system/apt-daily-upgrade.timer.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  tags:
+    - auto-updates
+    - config
+
+- name: (debian) Configure apt-daily-upgrade timer schedule
+  copy:
+    content: |
+      [Timer]
+      OnCalendar=
+      OnCalendar=*-*-* {{ update_schedule }}:00
+      RandomizedDelaySec=0
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+    dest: /etc/systemd/system/apt-daily-upgrade.timer.d/override.conf
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  notify:
+    - reload systemd
+    - restart apt-daily-upgrade-timer
+  tags:
+    - auto-updates
+    - schedule
+
+- name: (debian) Disable services apt-daily-upgrade.timer when updates disabled
+  systemd:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop:
+    - unattended-upgrades
+    - apt-daily-upgrade.timer
+  when: not (auto_updates_enabled | bool)
+  tags:
+    - auto-updates
+    - service
