@@ -14,9 +14,13 @@ Unattended-Upgrade::Allowed-Origins {
 
 // Python regular expressions, matching packages to exclude from the upgrade
 Unattended-Upgrade::Package-Blacklist {
-{% for package in update_exclude_packages %}
-    "{{ package }}";
-{% endfor %}
+{% if update_exclude_packages is string %}
+    "{{ update_exclude_packages }}";
+{% else %}
+    {% for package in update_exclude_packages %}
+        "{{ package }}";
+    {% endfor %}
+{% endif %}
 };
 
 // This option allows you to control if on a unclean dpkg exit
