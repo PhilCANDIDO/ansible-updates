@@ -1,5 +1,6 @@
 ---
 # Debian family specific tasks (Debian, Ubuntu)
+
 - name: (debian) Update apt cache
   apt:
     update_cache: true
@@ -25,6 +26,19 @@
     owner: root
     group: root
     mode: '0755'
+  tags:
+    - auto-updates
+    - config
+
+- name: (debian) Normalize update_exclude_packages to list
+  set_fact:
+    update_exclude_packages_list: >-
+      {{
+        update_exclude_packages if update_exclude_packages is sequence and update_exclude_packages is not string
+        else [update_exclude_packages] if update_exclude_packages is string and update_exclude_packages != ""
+        else update_exclude_packages.split(',') if update_exclude_packages is string and ',' in update_exclude_packages
+        else []
+      }}
   tags:
     - auto-updates
     - config

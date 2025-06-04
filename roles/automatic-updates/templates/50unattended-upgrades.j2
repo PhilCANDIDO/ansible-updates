@@ -14,11 +14,9 @@ Unattended-Upgrade::Allowed-Origins {
 
 // Python regular expressions, matching packages to exclude from the upgrade
 Unattended-Upgrade::Package-Blacklist {
-{% if update_exclude_packages is string %}
-    "{{ update_exclude_packages }}";
-{% else %}
-    {% for package in update_exclude_packages %}
-        "{{ package }}";
+{% if update_exclude_packages_list is defined and update_exclude_packages_list | length > 0 %}
+    {% for package in update_exclude_packages_list %}
+    "{{ package }}";
     {% endfor %}
 {% endif %}
 };

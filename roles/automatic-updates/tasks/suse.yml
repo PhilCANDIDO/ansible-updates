@@ -1,5 +1,6 @@
 ---
 # SUSE family specific tasks (openSUSE)
+
 - name: (suse) Install automatic updates packages
   package:
     name:
@@ -10,13 +11,26 @@
     - auto-updates
     - install
 
+- name: (suse) Normalize update_exclude_packages to list
+  set_fact:
+    update_exclude_packages_list: >-
+      {{
+        update_exclude_packages if update_exclude_packages is sequence and update_exclude_packages is not string
+        else [update_exclude_packages] if update_exclude_packages is string and update_exclude_packages != ""
+        else update_exclude_packages.split(',') if update_exclude_packages is string and ',' in update_exclude_packages
+        else []
+      }}
+  tags:
+    - auto-updates
+    - config
+
 - name: (suse) Configure zypper automatic updates exclusions
   lineinfile:
     path: /etc/zypp/zypp.conf
     regexp: '^solver.onlyRequires'
     line: "solver.onlyRequires = true"
     backup: true
-  when: update_exclude_packages is defined and update_exclude_packages | length > 0
+  when: update_exclude_packages_list is defined and update_exclude_packages_list | length > 0
   tags:
     - auto-updates
     - config

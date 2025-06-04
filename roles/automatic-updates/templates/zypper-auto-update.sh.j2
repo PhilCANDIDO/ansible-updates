@@ -1,7 +1,8 @@
 #!/bin/bash
 # Automatic zypper update script
 
-EXCLUDE_PACKAGES="{{ update_exclude_packages | join(' ') }}"
+{% if update_exclude_packages_list is defined and update_exclude_packages_list | length > 0 %}
+EXCLUDE_PACKAGES="{{ update_exclude_packages_list | join(' ') }}"
 
 if [ -n "$EXCLUDE_PACKAGES" ]; then
     /usr/bin/zypper --non-interactive update --auto-agree-with-licenses \
@@ -9,3 +10,6 @@ if [ -n "$EXCLUDE_PACKAGES" ]; then
 else
     /usr/bin/zypper --non-interactive update --auto-agree-with-licenses
 fi
+{% else %}
+/usr/bin/zypper --non-interactive update --auto-agree-with-licenses
+{% endif %}

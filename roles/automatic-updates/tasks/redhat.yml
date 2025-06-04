@@ -85,32 +85,53 @@
     - auto-updates
     - config
 
-- name: (redhat) Configure package exclusions in dnf.conf
-  lineinfile:
-    path: /etc/dnf/dnf.conf
-    regexp: '^exclude='
-    line: "exclude={{ (current_dnf_excludes.stdout.split('=')[1].split() + update_exclude_packages) | unique | join(' ') }}"
-    state: "{{ 'present' if (update_exclude_packages is defined and update_exclude_packages | length > 0) else 'absent' }}"
-    backup: true
-  when: 
-    - current_dnf_excludes.stdout is defined
-    - current_dnf_excludes.stdout != "exclude="
+- name: (redhat) Normalize update_exclude_packages to list
+  set_fact:
+    update_exclude_packages_list: >-
+      {{
+        update_exclude_packages if update_exclude_packages is sequence and update_exclude_packages is not string
+        else [update_exclude_packages] if update_exclude_packages is string and update_exclude_packages != ""
+        else update_exclude_packages.split(',') if update_exclude_packages is string and ',' in update_exclude_packages
+        else []
+      }}
   tags:
     - auto-updates
     - config
 
-- name: (redhat) Add package exclusions to dnf.conf (if no existing exclusions)
+- name: (redhat) Get current exclusions from dnf.conf
+  set_fact:
+    current_excludes_list: >-
+      {{
+        current_dnf_excludes.stdout.split('=')[1].split() if current_dnf_excludes.stdout is defined and current_dnf_excludes.stdout != "exclude="
+        else []
+      }}
+  tags:
+    - auto-updates
+    - config
+
+- name: (redhat) Configure package exclusions in dnf.conf
   lineinfile:
     path: /etc/dnf/dnf.conf
     regexp: '^exclude='
-    line: "exclude={{ update_exclude_packages | join(' ') }}"
+    line: "exclude={{ (current_excludes_list + update_exclude_packages_list) | unique | join(' ') }}"
     state: present
     backup: true
   when: 
-    - current_dnf_excludes.stdout is defined
-    - current_dnf_excludes.stdout == "exclude="
-    - update_exclude_packages is defined 
-    - update_exclude_packages | length > 0
+    - update_exclude_packages_list is defined
+    - update_exclude_packages_list | length > 0
+  tags:
+    - auto-updates
+    - config
+
+- name: (redhat) Remove package exclusions from dnf.conf when no exclusions defined
+  lineinfile:
+    path: /etc/dnf/dnf.conf
+    regexp: '^exclude='
+    state: absent
+    backup: true
+  when: 
+    - update_exclude_packages_list is not defined or update_exclude_packages_list | length == 0
+    - current_excludes_list is not defined or current_excludes_list | length == 0
   tags:
     - auto-updates
     - config
