@@ -26,3 +26,10 @@
 - name: reload systemd
   systemd:
     daemon_reload: true
+
+- name: restart apt-daily-upgrade-timer
+  systemd:
+    name: apt-daily-upgrade.timer
+    state: restarted
+    enabled: true
+    daemon_reload: true
