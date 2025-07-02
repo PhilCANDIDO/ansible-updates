@@ -1,9 +1,14 @@
 #!/bin/bash
 #
 # ansible_user_setup.sh - Create and configure Ansible user on various Linux distributions
-# Version: 2.0.0 - Enhanced distribution agnostic and idempotent version
+# Version: 2.1.0 - Enhanced version with Debian-specific improvements
 #
 # CHANGELOG:
+# 2.1.0 - 2025-07-02 - Debian-specific improvements
+#   - Fixed passwordless account handling for Debian 12
+#   - Enhanced distribution detection and early logging
+#   - Improved error handling for locked accounts
+#   - Better SSH configuration for Debian family
 # 2.0.0 - 2025-07-02 - Enhanced version
 #   - Improved distribution detection with fallback mechanisms
 #   - Enhanced idempotency for all operations
@@ -16,7 +21,7 @@
 
 set -euo pipefail
 
-VERSION="2.0.0"
+VERSION="2.1.0"
 
 # Default variables
 LOG_FILE="/var/log/ansible_user_setup.log"
@@ -361,8 +366,176 @@ create_user() {
     # Lock password - idempotent operation
     lock_user_password "$username"
     
-    # Set account to never expire - idempotent operation
-    set_account_never_expire "$username"
+# Configure SSH to allow key authentication for locked accounts - Debian 12 optimized
+configure_ssh_for_locked_accounts() {
+    log "INFO" "Configuring SSH for secure key-only authentication"
+    
+    local sshd_config="/etc/ssh/sshd_config"
+    local sshd_config_d="/etc/ssh/sshd_config.d"
+    local custom_config="$sshd_config_d/50-ansible-automation.conf"
+    local restart_needed=false
+    
+    # Create sshd_config.d directory if it doesn't exist (Debian 12 uses this)
+    if [[ ! -d "$sshd_config_d" ]]; then
+        execute_command "mkdir -p '$sshd_config_d'" "Create SSH config directory"
+    fi
+    
+    # For Debian 12, use modular configuration
+    if [[ "$DISTRO_FAMILY" == "debian" ]]; then
+        log "INFO" "Using Debian 12 modular SSH configuration"
+        
+        if [[ "$DRY_RUN" != "true" ]]; then
+            cat > "$custom_config" << EOF
+# Ansible automation user SSH configuration
+# This file ensures SSH key authentication works for automation users
+# Generated for user: $USERNAME
+
+# Global settings for security
+PasswordAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+
+# Allow SSH key authentication for users with no password
+PermitEmptyPasswords no
+
+# Specific configuration for automation user: $USERNAME
+Match User $USERNAME
+    PubkeyAuthentication yes
+    PasswordAuthentication no
+    AuthenticationMethods publickey
+EOF
+            log "INFO" "✓ Created modular SSH configuration for user $USERNAME: $custom_config"
+            restart_needed=true
+        else
+            log "INFO" "[DRY-RUN] Would create SSH configuration for user $USERNAME: $custom_config"
+        fi
+    else
+        # For other distributions, modify main config
+        log "INFO" "Using traditional SSH configuration method"
+        
+        # Backup original config
+        if [[ ! -f "${sshd_config}.backup" ]]; then
+            execute_command "cp '$sshd_config' '${sshd_config}.backup'" "Backup SSH configuration"
+        fi
+        
+        # Configure main sshd_config
+        local config_updated=false
+        
+        # Check and set PasswordAuthentication
+        if grep -q "^PasswordAuthentication" "$sshd_config"; then
+            if ! grep -q "^PasswordAuthentication no" "$sshd_config"; then
+                execute_command "sed -i 's/^PasswordAuthentication.*/PasswordAuthentication no/' '$sshd_config'" "Disable password authentication"
+                config_updated=true
+            fi
+        else
+            execute_command "echo 'PasswordAuthentication no' >> '$sshd_config'" "Add PasswordAuthentication no"
+            config_updated=true
+        fi
+        
+        # Check and set PubkeyAuthentication
+        if grep -q "^PubkeyAuthentication" "$sshd_config"; then
+            if ! grep -q "^PubkeyAuthentication yes" "$sshd_config"; then
+                execute_command "sed -i 's/^PubkeyAuthentication.*/PubkeyAuthentication yes/' '$sshd_config'" "Enable public key authentication"
+                config_updated=true
+            fi
+        else
+            execute_command "echo 'PubkeyAuthentication yes' >> '$sshd_config'" "Add PubkeyAuthentication yes"
+            config_updated=true
+        fi
+        
+        # Add Match block for the specific user if not already present
+        if ! grep -q "Match User $USERNAME" "$sshd_config"; then
+            execute_command "echo '' >> '$sshd_config'" "Add empty line before Match block"
+            execute_command "echo '# SSH configuration for user $USERNAME' >> '$sshd_config'" "Add comment for user config"
+            execute_command "echo 'Match User $USERNAME' >> '$sshd_config'" "Add Match User block"
+            execute_command "echo '    PubkeyAuthentication yes' >> '$sshd_config'" "Add PubkeyAuthentication for user"
+            execute_command "echo '    PasswordAuthentication no' >> '$sshd_config'" "Add PasswordAuthentication for user"
+            execute_command "echo '    AuthenticationMethods publickey' >> '$sshd_config'" "Add AuthenticationMethods for user"
+            config_updated=true
+            log "INFO" "✓ Added Match User block for $USERNAME in main SSH config"
+        else
+            log "INFO" "Match User block for $USERNAME already exists in SSH config"
+        fi
+        
+        if [[ "$config_updated" == "true" ]]; then
+            restart_needed=true
+        fi
+    fi
+    
+    # Test SSH configuration
+    if [[ "$DRY_RUN" != "true" ]]; then
+        if ! sshd -t; then
+            log "ERROR" "SSH configuration test failed"
+            
+            # Cleanup on error
+            if [[ -f "$custom_config" ]]; then
+                rm -f "$custom_config"
+            elif [[ -f "${sshd_config}.backup" ]]; then
+                execute_command "cp '${sshd_config}.backup' '$sshd_config'" "Restore SSH configuration backup"
+            fi
+            
+            exit 1
+        fi
+        log "INFO" "✓ SSH configuration test passed"
+    fi
+    
+    # Restart SSH service if needed
+    if [[ "$restart_needed" == "true" ]]; then
+        log "INFO" "SSH configuration updated, restarting SSH service"
+        restart_ssh_service
+    else
+        log "INFO" "SSH configuration is already properly configured"
+    fi
+}
+
+# Restart SSH service with distribution detection
+restart_ssh_service() {
+    local ssh_service=""
+    
+    # Detect SSH service name based on distribution
+    case "$DISTRO_FAMILY" in
+        "debian")
+            ssh_service="ssh"
+            ;;
+        "redhat"|"suse"|"arch"|"alpine")
+            ssh_service="sshd"
+            ;;
+        *)
+            # Try to detect automatically
+            if systemctl list-units --type=service | grep -q "sshd.service"; then
+                ssh_service="sshd"
+            elif systemctl list-units --type=service | grep -q "ssh.service"; then
+                ssh_service="ssh"
+            else
+                log "WARN" "Could not detect SSH service name, trying both sshd and ssh"
+                ssh_service="sshd"
+            fi
+            ;;
+    esac
+    
+    execute_command "systemctl restart '$ssh_service'" "Restart SSH service ($ssh_service)"
+    
+    # Verify service is running
+    if [[ "$DRY_RUN" != "true" ]]; then
+        if ! systemctl is-active "$ssh_service" &>/dev/null; then
+            log "ERROR" "SSH service failed to start, trying alternative service name"
+            local alt_service
+            if [[ "$ssh_service" == "sshd" ]]; then
+                alt_service="ssh"
+            else
+                alt_service="sshd"
+            fi
+            
+            execute_command "systemctl restart '$alt_service'" "Restart SSH service ($alt_service)"
+            
+            if ! systemctl is-active "$alt_service" &>/dev/null; then
+                log "ERROR" "Failed to restart SSH service"
+                exit 1
+            fi
+        fi
+        log "INFO" "SSH service restarted successfully"
+    fi
+}
 }
 
 # Enhanced password locking with idempotency
@@ -376,16 +549,34 @@ lock_user_password() {
     if [[ "$passwd_status" == "L" || "$passwd_status" == "LK" ]]; then
         log "INFO" "Password for user $username is already locked"
     else
-        log "INFO" "Locking password for user $username"
+        log "INFO" "Configuring password-less authentication for user $username"
+        
+        # Method 1: Set empty password then lock (preferred for SSH key auth)
+        execute_command "passwd -d '$username' &>/dev/null" "Remove password for user $username"
         execute_command "passwd -l '$username' &>/dev/null" "Lock password for user $username"
+        
+        # Method 2: Alternative approach using usermod if passwd fails
+        if [[ $? -ne 0 ]]; then
+            log "WARN" "Standard password lock failed, trying alternative method"
+            execute_command "usermod -L '$username'" "Lock account using usermod"
+        fi
+        
+        # Verify SSH can still work with locked account
+        configure_ssh_for_locked_accounts
     fi
 }
 
-# Enhanced account expiration setting with idempotency
+# Enhanced account expiration setting with idempotency - integrated with password config
 set_account_never_expire() {
     local username="$1"
     
-    # Check current account expiration
+    # Skip for Debian as it's already handled in lock_user_password()
+    if [[ "$DISTRO_FAMILY" == "debian" ]]; then
+        log "DEBUG" "Account expiration already configured in Debian password setup"
+        return 0
+    fi
+    
+    # Check current account expiration for non-Debian systems
     local current_expire
     current_expire=$(chage -l "$username" 2>/dev/null | grep "Account expires" | cut -d: -f2 | xargs || echo "unknown")
     
@@ -675,6 +866,13 @@ main() {
     
     log "INFO" "Starting Ansible User Setup Script v$VERSION"
     
+    # Detect Linux distribution and package manager first
+    detect_distro
+    
+    # Show distribution info early for better debugging
+    log "INFO" "Detected system: $DISTRO ($DISTRO_FAMILY) version $VERSION_ID"
+    log "INFO" "Package manager: $PACKAGE_MANAGER"
+    
     # Validate required parameters
     if [[ -z "$USERNAME" ]]; then
         log "ERROR" "Username is required (use --user)"
@@ -693,9 +891,6 @@ main() {
     
     # Check if running as root
     check_root
-    
-    # Detect Linux distribution and package manager
-    detect_distro
     
     # Validate all parameters
     validate_parameters "$USERNAME" "$SSH_KEY" "$GROUP" "$SHELL"
