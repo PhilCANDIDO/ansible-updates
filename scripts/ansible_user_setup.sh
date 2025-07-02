@@ -1,27 +1,23 @@
 #!/bin/bash
 #
 # ansible_user_setup.sh - Create and configure Ansible user on various Linux distributions
-# Version: 2.1.0 - Enhanced version with Debian-specific improvements
+# Version: 2.1.1 - Fixed Debian 12 SSH key authentication for locked accounts
 #
 # CHANGELOG:
+# 2.1.1 - 2025-07-02 - Fixed SSH configuration for locked accounts
+#   - Fixed configure_ssh_for_locked_accounts function placement and execution
+#   - Improved password locking sequence for Debian 12
+#   - Enhanced SSH configuration for key-only authentication
+#   - Better account state management for automation users
 # 2.1.0 - 2025-07-02 - Debian-specific improvements
 #   - Fixed passwordless account handling for Debian 12
 #   - Enhanced distribution detection and early logging
 #   - Improved error handling for locked accounts
 #   - Better SSH configuration for Debian family
-# 2.0.0 - 2025-07-02 - Enhanced version
-#   - Improved distribution detection with fallback mechanisms
-#   - Enhanced idempotency for all operations
-#   - Better error handling and validation
-#   - Unified package manager detection
-#   - Improved SSH key management
-#   - Enhanced logging and debugging
-# 1.0.1 - 2025-03-24 - Fix group creation logic
-# 1.0.0 - 2025-03-24 - Initial version
 
 set -euo pipefail
 
-VERSION="2.1.0"
+VERSION="2.1.1"
 
 # Default variables
 LOG_FILE="/var/log/ansible_user_setup.log"
@@ -318,57 +314,11 @@ validate_ssh_key() {
     return 0
 }
 
-# Enhanced user creation with idempotency
-create_user() {
-    local username="$1"
-    local group="$2"
-    local shell="$3"
-    
-    log "INFO" "Processing user creation for: $username"
-    
-    # Create group first if it doesn't exist
-    if ! group_exists "$group"; then
-        log "INFO" "Creating group: $group"
-        execute_command "groupadd '$group'" "Create group $group"
-    else
-        log "INFO" "Group $group already exists"
-    fi
-    
-    # Create user if it doesn't exist
-    if ! user_exists "$username"; then
-        log "INFO" "Creating user: $username"
-        
-        # Universal user creation command
-        local create_user_cmd="useradd -m -g '$group' -s '$shell' -c 'Ansible automation user' '$username'"
-        execute_command "$create_user_cmd" "Create user $username"
-        
-        log "INFO" "User $username created successfully"
-    else
-        log "INFO" "User $username already exists"
-        
-        # Verify user configuration is correct
-        local current_shell
-        current_shell=$(getent passwd "$username" | cut -d: -f7)
-        local current_group
-        current_group=$(id -gn "$username")
-        
-        if [[ "$current_shell" != "$shell" ]]; then
-            log "INFO" "Updating shell for user $username from $current_shell to $shell"
-            execute_command "usermod -s '$shell' '$username'" "Update shell for user $username"
-        fi
-        
-        if [[ "$current_group" != "$group" ]]; then
-            log "INFO" "Updating primary group for user $username from $current_group to $group"
-            execute_command "usermod -g '$group' '$username'" "Update primary group for user $username"
-        fi
-    fi
-    
-    # Lock password - idempotent operation
-    lock_user_password "$username"
-    
-# Configure SSH to allow key authentication for locked accounts - Debian 12 optimized
+# Configure SSH to allow key authentication for locked accounts - Fixed function
 configure_ssh_for_locked_accounts() {
-    log "INFO" "Configuring SSH for secure key-only authentication"
+    local username="$1"
+    
+    log "INFO" "Configuring SSH for secure key-only authentication for user: $username"
     
     local sshd_config="/etc/ssh/sshd_config"
     local sshd_config_d="/etc/ssh/sshd_config.d"
@@ -388,7 +338,7 @@ configure_ssh_for_locked_accounts() {
             cat > "$custom_config" << EOF
 # Ansible automation user SSH configuration
 # This file ensures SSH key authentication works for automation users
-# Generated for user: $USERNAME
+# Generated for user: $username
 
 # Global settings for security
 PasswordAuthentication no
@@ -398,16 +348,16 @@ AuthorizedKeysFile .ssh/authorized_keys
 # Allow SSH key authentication for users with no password
 PermitEmptyPasswords no
 
-# Specific configuration for automation user: $USERNAME
-Match User $USERNAME
+# Specific configuration for automation user: $username
+Match User $username
     PubkeyAuthentication yes
     PasswordAuthentication no
     AuthenticationMethods publickey
 EOF
-            log "INFO" "✓ Created modular SSH configuration for user $USERNAME: $custom_config"
+            log "INFO" "✓ Created modular SSH configuration for user $username: $custom_config"
             restart_needed=true
         else
-            log "INFO" "[DRY-RUN] Would create SSH configuration for user $USERNAME: $custom_config"
+            log "INFO" "[DRY-RUN] Would create SSH configuration for user $username: $custom_config"
         fi
     else
         # For other distributions, modify main config
@@ -444,17 +394,17 @@ EOF
         fi
         
         # Add Match block for the specific user if not already present
-        if ! grep -q "Match User $USERNAME" "$sshd_config"; then
+        if ! grep -q "Match User $username" "$sshd_config"; then
             execute_command "echo '' >> '$sshd_config'" "Add empty line before Match block"
-            execute_command "echo '# SSH configuration for user $USERNAME' >> '$sshd_config'" "Add comment for user config"
-            execute_command "echo 'Match User $USERNAME' >> '$sshd_config'" "Add Match User block"
+            execute_command "echo '# SSH configuration for user $username' >> '$sshd_config'" "Add comment for user config"
+            execute_command "echo 'Match User $username' >> '$sshd_config'" "Add Match User block"
             execute_command "echo '    PubkeyAuthentication yes' >> '$sshd_config'" "Add PubkeyAuthentication for user"
             execute_command "echo '    PasswordAuthentication no' >> '$sshd_config'" "Add PasswordAuthentication for user"
             execute_command "echo '    AuthenticationMethods publickey' >> '$sshd_config'" "Add AuthenticationMethods for user"
             config_updated=true
-            log "INFO" "✓ Added Match User block for $USERNAME in main SSH config"
+            log "INFO" "✓ Added Match User block for $username in main SSH config"
         else
-            log "INFO" "Match User block for $USERNAME already exists in SSH config"
+            log "INFO" "Match User block for $username already exists in SSH config"
         fi
         
         if [[ "$config_updated" == "true" ]]; then
@@ -536,69 +486,104 @@ restart_ssh_service() {
         log "INFO" "SSH service restarted successfully"
     fi
 }
+
+# Enhanced user creation with idempotency
+create_user() {
+    local username="$1"
+    local group="$2"
+    local shell="$3"
+    
+    log "INFO" "Processing user creation for: $username"
+    
+    # Create group first if it doesn't exist
+    if ! group_exists "$group"; then
+        log "INFO" "Creating group: $group"
+        execute_command "groupadd '$group'" "Create group $group"
+    else
+        log "INFO" "Group $group already exists"
+    fi
+    
+    # Create user if it doesn't exist
+    if ! user_exists "$username"; then
+        log "INFO" "Creating user: $username"
+        
+        # Universal user creation command
+        local create_user_cmd="useradd -m -g '$group' -s '$shell' -c 'Ansible automation user' '$username'"
+        execute_command "$create_user_cmd" "Create user $username"
+        
+        log "INFO" "User $username created successfully"
+    else
+        log "INFO" "User $username already exists"
+        
+        # Verify user configuration is correct
+        local current_shell
+        current_shell=$(getent passwd "$username" | cut -d: -f7)
+        local current_group
+        current_group=$(id -gn "$username")
+        
+        if [[ "$current_shell" != "$shell" ]]; then
+            log "INFO" "Updating shell for user $username from $current_shell to $shell"
+            execute_command "usermod -s '$shell' '$username'" "Update shell for user $username"
+        fi
+        
+        if [[ "$current_group" != "$group" ]]; then
+            log "INFO" "Updating primary group for user $username from $current_group to $group"
+            execute_command "usermod -g '$group' '$username'" "Update primary group for user $username"
+        fi
+    fi
+    
+    # Configure password and account for SSH key authentication
+    configure_user_for_ssh_keys "$username"
 }
 
-# Enhanced password locking with idempotency
-lock_user_password() {
+# Enhanced password locking and account configuration for SSH keys - FIXED
+configure_user_for_ssh_keys() {
     local username="$1"
     
-    # Check if password is already locked
+    log "INFO" "Configuring user $username for SSH key authentication"
+    
+    # Check current password status
     local passwd_status
     passwd_status=$(passwd -S "$username" 2>/dev/null | awk '{print $2}' || echo "unknown")
     
-    if [[ "$passwd_status" == "L" || "$passwd_status" == "LK" ]]; then
-        log "INFO" "Password for user $username is already locked"
+    log "DEBUG" "Current password status for $username: $passwd_status"
+    
+    # Configure SSH first to ensure key authentication works
+    configure_ssh_for_locked_accounts "$username"
+    
+    # Configure account for passwordless SSH key authentication
+    if [[ "$DISTRO_FAMILY" == "debian" ]]; then
+        log "INFO" "Configuring Debian-style account for SSH key authentication"
+        
+        # For Debian 12: Remove password, then lock with unlock capability
+        execute_command "passwd -d '$username'" "Remove password for user $username"
+        execute_command "usermod -U '$username'" "Unlock account for user $username"
+        execute_command "chage -E -1 '$username'" "Set account to never expire for user $username"
+        
+        # Verify the account is in the correct state (LK status)
+        local new_status
+        new_status=$(passwd -S "$username" 2>/dev/null | awk '{print $2}' || echo "unknown")
+        log "INFO" "Final password status for $username: $new_status"
+        
+        if [[ "$new_status" != "LK" ]]; then
+            log "WARN" "Password status is $new_status, expected LK. This may affect SSH key authentication."
+        fi
     else
-        log "INFO" "Configuring password-less authentication for user $username"
+        # For other distributions
+        log "INFO" "Configuring account for SSH key authentication (non-Debian)"
         
-        # Method 1: Set empty password then lock (preferred for SSH key auth)
-        execute_command "passwd -d '$username' &>/dev/null" "Remove password for user $username"
-        execute_command "passwd -l '$username' &>/dev/null" "Lock password for user $username"
-        
-        # Method 2: Alternative approach using usermod if passwd fails
-        if [[ $? -ne 0 ]]; then
-            log "WARN" "Standard password lock failed, trying alternative method"
-            execute_command "usermod -L '$username'" "Lock account using usermod"
+        if [[ "$passwd_status" == "L" || "$passwd_status" == "LK" ]]; then
+            log "INFO" "Password for user $username is already locked"
+        else
+            execute_command "passwd -d '$username'" "Remove password for user $username"
+            execute_command "passwd -l '$username'" "Lock password for user $username"
         fi
         
-        # Verify SSH can still work with locked account
-        configure_ssh_for_locked_accounts
-    fi
-}
-
-# Enhanced account expiration setting with idempotency - integrated with password config
-set_account_never_expire() {
-    local username="$1"
-    
-    # Skip for Debian as it's already handled in lock_user_password()
-    if [[ "$DISTRO_FAMILY" == "debian" ]]; then
-        log "DEBUG" "Account expiration already configured in Debian password setup"
-        return 0
+        # Set account to never expire
+        execute_command "chage -E -1 -M 99999 '$username'" "Set account never expire for user $username"
     fi
     
-    # Check current account expiration for non-Debian systems
-    local current_expire
-    current_expire=$(chage -l "$username" 2>/dev/null | grep "Account expires" | cut -d: -f2 | xargs || echo "unknown")
-    
-    if [[ "$current_expire" == "never" ]]; then
-        log "INFO" "Account $username is already set to never expire"
-    else
-        log "INFO" "Setting account $username to never expire"
-        
-        # Universal command that works across distributions
-        case "$DISTRO_FAMILY" in
-            "redhat")
-                if [[ "${VERSION_ID%%.*}" -ge 7 ]] 2>/dev/null || [[ "$DISTRO" == "fedora" ]]; then
-                    execute_command "chage -E -1 -M 99999 '$username'" "Set account never expire (RHEL 7+/Fedora)"
-                else
-                    execute_command "chage -I -1 -m 0 -M 99999 -E -1 '$username'" "Set account never expire (RHEL 6)"
-                fi
-                ;;
-            *)
-                execute_command "chage -E -1 -M 99999 '$username'" "Set account never expire (Generic)"
-                ;;
-        esac
-    fi
+    log "INFO" "User $username configured for SSH key authentication"
 }
 
 # Enhanced SSH key setup with idempotency
@@ -917,6 +902,19 @@ main() {
         log "INFO" "=== DRY RUN COMPLETED - NO ACTUAL CHANGES MADE ==="
     else
         log "INFO" "User setup completed successfully for: $USERNAME"
+        
+        # Final verification
+        local final_status
+        final_status=$(passwd -S "$USERNAME" 2>/dev/null | awk '{print $2}' || echo "unknown")
+        log "INFO" "Final user status: $USERNAME password status = $final_status"
+        
+        if [[ "$DISTRO_FAMILY" == "debian" && "$final_status" == "LK" ]]; then
+            log "INFO" "✓ User $USERNAME is properly configured for SSH key authentication on Debian"
+        elif [[ "$DISTRO_FAMILY" != "debian" && ("$final_status" == "L" || "$final_status" == "LK") ]]; then
+            log "INFO" "✓ User $USERNAME is properly configured for SSH key authentication"
+        else
+            log "WARN" "User $USERNAME may not be properly configured for SSH key authentication (status: $final_status)"
+        fi
     fi
     
     log "INFO" "Script execution completed"
