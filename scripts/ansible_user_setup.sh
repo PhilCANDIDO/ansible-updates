@@ -1,24 +1,33 @@
 #!/bin/bash
 #
 # ansible_user_setup.sh - Create and configure Ansible user on various Linux distributions
-# Version: 1.0.1
+# Version: 2.0.0 - Enhanced distribution agnostic and idempotent version
 #
 # CHANGELOG:
+# 2.0.0 - 2025-07-02 - Enhanced version
+#   - Improved distribution detection with fallback mechanisms
+#   - Enhanced idempotency for all operations
+#   - Better error handling and validation
+#   - Unified package manager detection
+#   - Improved SSH key management
+#   - Enhanced logging and debugging
 # 1.0.1 - 2025-03-24 - Fix group creation logic
 # 1.0.0 - 2025-03-24 - Initial version
-#   - User creation with no password
-#   - SSH key setup
-#   - Account set to never expire
-#   - Support for various Linux distributions (RHEL/CentOS/Oracle, Debian/Ubuntu)
-#   - Logging
 
 set -euo pipefail
 
-VERSION="1.0.1"
+VERSION="2.0.0"
 
 # Default variables
 LOG_FILE="/var/log/ansible_user_setup.log"
 DATE=$(date +"%Y-%m-%d %H:%M:%S")
+DEBUG=${DEBUG:-false}
+
+# Distribution detection variables
+DISTRO=""
+DISTRO_FAMILY=""
+VERSION_ID=""
+PACKAGE_MANAGER=""
 
 # Function to display help
 show_help() {
@@ -26,6 +35,7 @@ show_help() {
 Usage: $(basename "$0") --user USERNAME --key "SSH_PUBLIC_KEY"
 
 Deploy Ansible connection user on Linux servers with SSH key authentication.
+Enhanced version with improved distribution detection and idempotency.
 
 Options:
   -h, --help              Display this help message and exit
@@ -36,11 +46,22 @@ Options:
   -l, --log FILE          Log file location (default: /var/log/ansible_user_setup.log)
   -s, --shell SHELL       User shell (default: /bin/bash)
   -n, --no-sudo           Do not configure sudo access (default: with sudo)
+  -d, --debug             Enable debug mode for troubleshooting
+  --dry-run               Show what would be done without making changes
 
 Examples:
   $(basename "$0") --user ansible --key "ssh-rsa AAAAB3Nza..."
   $(basename "$0") --user automation --key "ssh-rsa AAAAB3Nza..." --group wheel
   $(basename "$0") --user ansible --key "ssh-rsa AAAAB3Nza..." --shell /bin/sh --no-sudo
+  $(basename "$0") --user ansible --key "ssh-rsa AAAAB3Nza..." --debug --dry-run
+
+Supported Distributions:
+  - Red Hat family: RHEL, CentOS, AlmaLinux, Rocky Linux, Oracle Linux, Fedora
+  - Debian family: Debian, Ubuntu, Linux Mint
+  - SUSE family: openSUSE, SLES
+  - Arch family: Arch Linux, Manjaro
+  - Alpine Linux
+  - Amazon Linux
 
 EOF
     exit 0
@@ -52,206 +73,552 @@ show_version() {
     exit 0
 }
 
-# Log function
+# Enhanced logging function
 log() {
-    local message="$1"
-    echo "[$(date +"%Y-%m-%d %H:%M:%S")] $message" | tee -a "$LOG_FILE"
+    local level="$1"
+    local message="$2"
+    local timestamp="$(date +"%Y-%m-%d %H:%M:%S")"
+    local log_entry="[$timestamp] [$level] $message"
+    
+    # Always write to log file
+    echo "$log_entry" >> "$LOG_FILE"
+    
+    # Display based on level
+    case "$level" in
+        "ERROR")
+            echo -e "\033[31m$log_entry\033[0m" >&2
+            ;;
+        "WARN")
+            echo -e "\033[33m$log_entry\033[0m"
+            ;;
+        "INFO")
+            echo "$log_entry"
+            ;;
+        "DEBUG")
+            if [[ "$DEBUG" == "true" ]]; then
+                echo -e "\033[36m$log_entry\033[0m"
+            fi
+            ;;
+    esac
+}
+
+# Function to execute command with dry-run support
+execute_command() {
+    local cmd="$1"
+    local description="$2"
+    local dry_run="${3:-$DRY_RUN}"
+    
+    log "DEBUG" "Command: $cmd"
+    
+    if [[ "$dry_run" == "true" ]]; then
+        log "INFO" "[DRY-RUN] Would execute: $description"
+        return 0
+    else
+        log "INFO" "Executing: $description"
+        eval "$cmd"
+    fi
 }
 
 # Check if running as root
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        log "ERROR: This script must be run as root"
+        log "ERROR" "This script must be run as root"
         exit 1
     fi
 }
 
-# Detect Linux distribution
+# Enhanced distribution detection with multiple fallback methods
 detect_distro() {
+    log "DEBUG" "Starting distribution detection"
+    
+    # Method 1: /etc/os-release (preferred)
     if [[ -f /etc/os-release ]]; then
+        log "DEBUG" "Using /etc/os-release for detection"
         . /etc/os-release
-        DISTRO=$ID
-        VERSION_ID=$VERSION_ID
+        DISTRO="${ID,,}"  # Convert to lowercase
+        VERSION_ID="${VERSION_ID:-unknown}"
+        
+        # Determine distribution family
+        case "$DISTRO" in
+            rhel|centos|almalinux|rocky|oracle|fedora|amzn)
+                DISTRO_FAMILY="redhat"
+                ;;
+            debian|ubuntu|mint)
+                DISTRO_FAMILY="debian"
+                ;;
+            opensuse*|sles)
+                DISTRO_FAMILY="suse"
+                ;;
+            arch|manjaro)
+                DISTRO_FAMILY="arch"
+                ;;
+            alpine)
+                DISTRO_FAMILY="alpine"
+                ;;
+            *)
+                DISTRO_FAMILY="unknown"
+                ;;
+        esac
+    
+    # Method 2: Legacy release files
     elif [[ -f /etc/redhat-release ]]; then
-        if grep -q "CentOS" /etc/redhat-release; then
-            DISTRO="centos"
-            VERSION_ID=$(cat /etc/redhat-release | tr -dc '0-9.' | cut -d \. -f1)
-        elif grep -q "Red Hat" /etc/redhat-release; then
-            DISTRO="rhel"
-            VERSION_ID=$(cat /etc/redhat-release | tr -dc '0-9.' | cut -d \. -f1)
-        elif grep -q "Oracle" /etc/redhat-release; then
-            DISTRO="oracle"
-            VERSION_ID=$(cat /etc/redhat-release | tr -dc '0-9.' | cut -d \. -f1)
-        fi
+        log "DEBUG" "Using /etc/redhat-release for detection"
+        DISTRO_FAMILY="redhat"
+        local release_content
+        release_content=$(cat /etc/redhat-release)
+        
+        case "$release_content" in
+            *"CentOS"*)
+                DISTRO="centos"
+                VERSION_ID=$(echo "$release_content" | grep -oE '[0-9]+' | head -1)
+                ;;
+            *"Red Hat"*)
+                DISTRO="rhel"
+                VERSION_ID=$(echo "$release_content" | grep -oE '[0-9]+' | head -1)
+                ;;
+            *"Oracle"*)
+                DISTRO="oracle"
+                VERSION_ID=$(echo "$release_content" | grep -oE '[0-9]+' | head -1)
+                ;;
+            *"AlmaLinux"*)
+                DISTRO="almalinux"
+                VERSION_ID=$(echo "$release_content" | grep -oE '[0-9]+' | head -1)
+                ;;
+            *"Rocky"*)
+                DISTRO="rocky"
+                VERSION_ID=$(echo "$release_content" | grep -oE '[0-9]+' | head -1)
+                ;;
+            *)
+                DISTRO="unknown_rhel"
+                VERSION_ID="unknown"
+                ;;
+        esac
+    
     elif [[ -f /etc/debian_version ]]; then
+        log "DEBUG" "Using /etc/debian_version for detection"
+        DISTRO_FAMILY="debian"
+        
         if [[ -f /etc/lsb-release ]] && grep -q "Ubuntu" /etc/lsb-release; then
             DISTRO="ubuntu"
-            VERSION_ID=$(cat /etc/debian_version)
+            VERSION_ID=$(lsb_release -rs 2>/dev/null || cat /etc/debian_version)
         else
             DISTRO="debian"
             VERSION_ID=$(cat /etc/debian_version | cut -d '.' -f1)
         fi
+    
+    # Method 3: Command-based detection
+    elif command -v lsb_release &>/dev/null; then
+        log "DEBUG" "Using lsb_release for detection"
+        DISTRO=$(lsb_release -si 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        VERSION_ID=$(lsb_release -sr 2>/dev/null)
+        
+        case "$DISTRO" in
+            *"redhat"*|*"centos"*|*"fedora"*|*"oracle"*)
+                DISTRO_FAMILY="redhat"
+                ;;
+            *"ubuntu"*|*"debian"*)
+                DISTRO_FAMILY="debian"
+                ;;
+            *"suse"*)
+                DISTRO_FAMILY="suse"
+                ;;
+            *)
+                DISTRO_FAMILY="unknown"
+                ;;
+        esac
+    
     else
+        log "WARN" "Unable to detect distribution using standard methods"
         DISTRO="unknown"
+        DISTRO_FAMILY="unknown"
         VERSION_ID="unknown"
     fi
     
-    log "Detected distribution: $DISTRO $VERSION_ID"
+    # Detect package manager
+    detect_package_manager
+    
+    log "INFO" "Detected distribution: $DISTRO ($DISTRO_FAMILY) version $VERSION_ID"
+    log "INFO" "Package manager: $PACKAGE_MANAGER"
 }
 
-# Check if user exists
+# Enhanced package manager detection
+detect_package_manager() {
+    log "DEBUG" "Detecting package manager"
+    
+    if command -v dnf &>/dev/null; then
+        PACKAGE_MANAGER="dnf"
+    elif command -v yum &>/dev/null; then
+        PACKAGE_MANAGER="yum"
+    elif command -v apt &>/dev/null; then
+        PACKAGE_MANAGER="apt"
+    elif command -v apt-get &>/dev/null; then
+        PACKAGE_MANAGER="apt-get"
+    elif command -v zypper &>/dev/null; then
+        PACKAGE_MANAGER="zypper"
+    elif command -v pacman &>/dev/null; then
+        PACKAGE_MANAGER="pacman"
+    elif command -v apk &>/dev/null; then
+        PACKAGE_MANAGER="apk"
+    else
+        PACKAGE_MANAGER="unknown"
+        log "WARN" "No known package manager detected"
+    fi
+    
+    log "DEBUG" "Package manager detected: $PACKAGE_MANAGER"
+}
+
+# Enhanced user existence check
 user_exists() {
     local username="$1"
-    if id "$username" &>/dev/null; then
-        return 0  # True, user exists
+    if getent passwd "$username" &>/dev/null; then
+        log "DEBUG" "User $username exists"
+        return 0
     else
-        return 1  # False, user does not exist
+        log "DEBUG" "User $username does not exist"
+        return 1
     fi
 }
 
-# Create user account
+# Enhanced group existence check
+group_exists() {
+    local groupname="$1"
+    if getent group "$groupname" &>/dev/null; then
+        log "DEBUG" "Group $groupname exists"
+        return 0
+    else
+        log "DEBUG" "Group $groupname does not exist"
+        return 1
+    fi
+}
+
+# Validate SSH public key format
+validate_ssh_key() {
+    local ssh_key="$1"
+    
+    # Basic SSH key format validation
+    if [[ ! "$ssh_key" =~ ^(ssh-rsa|ssh-dss|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521) ]]; then
+        log "ERROR" "Invalid SSH key format. Key must start with ssh-rsa, ssh-dss, ssh-ed25519, or ecdsa-sha2-*"
+        return 1
+    fi
+    
+    # Check if key has minimum required parts
+    local key_parts
+    key_parts=$(echo "$ssh_key" | wc -w)
+    if [[ $key_parts -lt 2 ]]; then
+        log "ERROR" "SSH key appears to be incomplete. Expected format: 'key-type key-data [comment]'"
+        return 1
+    fi
+    
+    log "DEBUG" "SSH key format validation passed"
+    return 0
+}
+
+# Enhanced user creation with idempotency
 create_user() {
     local username="$1"
     local group="$2"
     local shell="$3"
     
-    # If user already exists, skip creation
-    if user_exists "$username"; then
-        log "User $username already exists"
+    log "INFO" "Processing user creation for: $username"
+    
+    # Create group first if it doesn't exist
+    if ! group_exists "$group"; then
+        log "INFO" "Creating group: $group"
+        execute_command "groupadd '$group'" "Create group $group"
     else
-        # Create group if it doesn't exist (regardless of whether it matches username or not)
-        if ! getent group "$group" &>/dev/null; then
-            log "Creating group $group"
-            groupadd "$group"
-        fi
-        
-        # Create user based on distribution
-        case $DISTRO in
-            centos|rhel|oracle)
-                if [[ "$VERSION_ID" -ge 7 ]]; then
-                    useradd -m -g "$group" -s "$shell" -c "Ansible automation user" "$username"
-                else
-                    useradd -m -g "$group" -s "$shell" -c "Ansible automation user" "$username"
-                fi
-                ;;
-            debian|ubuntu)
-                useradd -m -g "$group" -s "$shell" -c "Ansible automation user" "$username"
-                ;;
-            *)
-                # Generic approach for unknown distributions
-                useradd -m -g "$group" -s "$shell" -c "Ansible automation user" "$username"
-                ;;
-        esac
-        log "Created user $username"
+        log "INFO" "Group $group already exists"
     fi
     
-    # Lock password for user (different commands for different distributions)
-    case $DISTRO in
-        centos|rhel|oracle)
-            passwd -l "$username" &>/dev/null
-            ;;
-        debian|ubuntu)
-            passwd -l "$username" &>/dev/null
-            ;;
-        *)
-            passwd -l "$username" &>/dev/null
-            ;;
-    esac
+    # Create user if it doesn't exist
+    if ! user_exists "$username"; then
+        log "INFO" "Creating user: $username"
+        
+        # Universal user creation command
+        local create_user_cmd="useradd -m -g '$group' -s '$shell' -c 'Ansible automation user' '$username'"
+        execute_command "$create_user_cmd" "Create user $username"
+        
+        log "INFO" "User $username created successfully"
+    else
+        log "INFO" "User $username already exists"
+        
+        # Verify user configuration is correct
+        local current_shell
+        current_shell=$(getent passwd "$username" | cut -d: -f7)
+        local current_group
+        current_group=$(id -gn "$username")
+        
+        if [[ "$current_shell" != "$shell" ]]; then
+            log "INFO" "Updating shell for user $username from $current_shell to $shell"
+            execute_command "usermod -s '$shell' '$username'" "Update shell for user $username"
+        fi
+        
+        if [[ "$current_group" != "$group" ]]; then
+            log "INFO" "Updating primary group for user $username from $current_group to $group"
+            execute_command "usermod -g '$group' '$username'" "Update primary group for user $username"
+        fi
+    fi
     
-    # Set account to never expire
-    case $DISTRO in
-        centos|rhel|oracle)
-            if [[ "$VERSION_ID" -ge 7 ]]; then
-                chage -E -1 -M 99999 "$username"
-            else
-                chage -I -1 -m 0 -M 99999 -E -1 "$username"
-            fi
-            ;;
-        debian|ubuntu)
-            chage -E -1 -M 99999 "$username"
-            ;;
-        *)
-            chage -E -1 -M 99999 "$username"
-            ;;
-    esac
-    log "Set account $username to never expire"
+    # Lock password - idempotent operation
+    lock_user_password "$username"
+    
+    # Set account to never expire - idempotent operation
+    set_account_never_expire "$username"
 }
 
-# Configure SSH key for user
+# Enhanced password locking with idempotency
+lock_user_password() {
+    local username="$1"
+    
+    # Check if password is already locked
+    local passwd_status
+    passwd_status=$(passwd -S "$username" 2>/dev/null | awk '{print $2}' || echo "unknown")
+    
+    if [[ "$passwd_status" == "L" || "$passwd_status" == "LK" ]]; then
+        log "INFO" "Password for user $username is already locked"
+    else
+        log "INFO" "Locking password for user $username"
+        execute_command "passwd -l '$username' &>/dev/null" "Lock password for user $username"
+    fi
+}
+
+# Enhanced account expiration setting with idempotency
+set_account_never_expire() {
+    local username="$1"
+    
+    # Check current account expiration
+    local current_expire
+    current_expire=$(chage -l "$username" 2>/dev/null | grep "Account expires" | cut -d: -f2 | xargs || echo "unknown")
+    
+    if [[ "$current_expire" == "never" ]]; then
+        log "INFO" "Account $username is already set to never expire"
+    else
+        log "INFO" "Setting account $username to never expire"
+        
+        # Universal command that works across distributions
+        case "$DISTRO_FAMILY" in
+            "redhat")
+                if [[ "${VERSION_ID%%.*}" -ge 7 ]] 2>/dev/null || [[ "$DISTRO" == "fedora" ]]; then
+                    execute_command "chage -E -1 -M 99999 '$username'" "Set account never expire (RHEL 7+/Fedora)"
+                else
+                    execute_command "chage -I -1 -m 0 -M 99999 -E -1 '$username'" "Set account never expire (RHEL 6)"
+                fi
+                ;;
+            *)
+                execute_command "chage -E -1 -M 99999 '$username'" "Set account never expire (Generic)"
+                ;;
+        esac
+    fi
+}
+
+# Enhanced SSH key setup with idempotency
 setup_ssh_key() {
     local username="$1"
     local ssh_key="$2"
-    local home_dir
     
-    # Get home directory
-    home_dir=$(eval echo ~"$username")
+    log "INFO" "Setting up SSH key for user: $username"
+    
+    # Validate SSH key format
+    if ! validate_ssh_key "$ssh_key"; then
+        log "ERROR" "SSH key validation failed"
+        exit 1
+    fi
+    
+    # Get home directory - more reliable method
+    local home_dir
+    home_dir=$(getent passwd "$username" | cut -d: -f6)
+    
+    if [[ -z "$home_dir" || "$home_dir" == "/" ]]; then
+        log "ERROR" "Unable to determine home directory for user $username"
+        exit 1
+    fi
+    
+    log "DEBUG" "Home directory for $username: $home_dir"
     
     # Create .ssh directory if it doesn't exist
-    if [[ ! -d "$home_dir/.ssh" ]]; then
-        mkdir -p "$home_dir/.ssh"
-        chmod 700 "$home_dir/.ssh"
-    fi
-    
-    # Add or update authorized_keys file
-    local auth_keys="$home_dir/.ssh/authorized_keys"
-    
-    # Check if key already exists in authorized_keys
-    if [[ -f "$auth_keys" ]] && grep -q -F "$ssh_key" "$auth_keys"; then
-        log "SSH key already exists for user $username"
+    local ssh_dir="$home_dir/.ssh"
+    if [[ ! -d "$ssh_dir" ]]; then
+        log "INFO" "Creating SSH directory: $ssh_dir"
+        execute_command "mkdir -p '$ssh_dir'" "Create SSH directory"
+        execute_command "chmod 700 '$ssh_dir'" "Set SSH directory permissions"
     else
-        echo "$ssh_key" >> "$auth_keys"
-        log "Added SSH key for user $username"
+        log "INFO" "SSH directory already exists: $ssh_dir"
+        # Ensure correct permissions
+        execute_command "chmod 700 '$ssh_dir'" "Ensure SSH directory permissions"
     fi
     
-    # Set correct permissions
-    chmod 600 "$auth_keys"
-    chown -R "$username:$(id -gn "$username")" "$home_dir/.ssh"
+    # Handle authorized_keys file
+    local auth_keys="$ssh_dir/authorized_keys"
+    
+    # Extract just the key part (first two fields) for comparison
+    local key_signature
+    key_signature=$(echo "$ssh_key" | awk '{print $1 " " $2}')
+    
+    # Check if key already exists
+    if [[ -f "$auth_keys" ]] && grep -qF "$key_signature" "$auth_keys"; then
+        log "INFO" "SSH key already exists for user $username"
+    else
+        log "INFO" "Adding SSH key for user $username"
+        if [[ "$DRY_RUN" != "true" ]]; then
+            echo "$ssh_key" >> "$auth_keys"
+        else
+            log "INFO" "[DRY-RUN] Would add SSH key to $auth_keys"
+        fi
+    fi
+    
+    # Set correct permissions and ownership
+    execute_command "chmod 600 '$auth_keys'" "Set authorized_keys permissions"
+    execute_command "chown -R '$username:$(id -gn "$username")' '$ssh_dir'" "Set SSH directory ownership"
+    
+    log "INFO" "SSH key setup completed for user $username"
 }
 
-# Configure sudo access if needed
+# Enhanced sudo configuration with idempotency
 configure_sudo() {
     local username="$1"
     local no_sudo="$2"
     
     if [[ "$no_sudo" == "true" ]]; then
-        log "Skipping sudo configuration as requested"
-        return
+        log "INFO" "Skipping sudo configuration as requested"
+        return 0
     fi
     
-    # Check if sudo is installed
+    # Check if sudo is available
     if ! command -v sudo &>/dev/null; then
-        log "WARNING: sudo is not installed, skipping sudo configuration"
-        return
+        log "WARN" "sudo command not found, attempting to install"
+        install_sudo
+        
+        # Re-check after installation attempt
+        if ! command -v sudo &>/dev/null; then
+            log "WARN" "sudo is not available and could not be installed, skipping sudo configuration"
+            return 0
+        fi
     fi
     
-    # Create sudoers.d directory if it doesn't exist
-    if [[ ! -d "/etc/sudoers.d" ]]; then
-        mkdir -p /etc/sudoers.d
-        chmod 750 /etc/sudoers.d
+    # Ensure sudoers.d directory exists
+    local sudoers_dir="/etc/sudoers.d"
+    if [[ ! -d "$sudoers_dir" ]]; then
+        log "INFO" "Creating sudoers.d directory"
+        execute_command "mkdir -p '$sudoers_dir'" "Create sudoers.d directory"
+        execute_command "chmod 750 '$sudoers_dir'" "Set sudoers.d permissions"
     fi
     
     # Create/update sudoers file for the user
-    local sudoers_file="/etc/sudoers.d/$username"
+    local sudoers_file="$sudoers_dir/$username"
+    local sudo_rule="$username ALL=(ALL) NOPASSWD: ALL"
     
-    # Only create if it doesn't exist or doesn't have the right content
-    if [[ ! -f "$sudoers_file" ]] || ! grep -q "$username ALL=(ALL) NOPASSWD: ALL" "$sudoers_file"; then
-        echo "$username ALL=(ALL) NOPASSWD: ALL" > "$sudoers_file"
-        chmod 440 "$sudoers_file"
-        log "Configured sudo access for user $username"
+    # Check if sudoers file exists and has correct content
+    if [[ -f "$sudoers_file" ]] && grep -qxF "$sudo_rule" "$sudoers_file"; then
+        log "INFO" "Sudo access already configured for user $username"
     else
-        log "Sudo access already configured for user $username"
+        log "INFO" "Configuring sudo access for user $username"
+        if [[ "$DRY_RUN" != "true" ]]; then
+            echo "$sudo_rule" > "$sudoers_file"
+            chmod 440 "$sudoers_file"
+        else
+            log "INFO" "[DRY-RUN] Would create sudo rule: $sudo_rule"
+        fi
+        log "INFO" "Sudo access configured for user $username"
+    fi
+    
+    # Validate sudoers file syntax
+    if [[ "$DRY_RUN" != "true" && -f "$sudoers_file" ]]; then
+        if ! visudo -cf "$sudoers_file" &>/dev/null; then
+            log "ERROR" "Sudoers file syntax error for $username"
+            rm -f "$sudoers_file"
+            exit 1
+        fi
     fi
 }
 
-# Main execution
+# Install sudo if not present
+install_sudo() {
+    log "INFO" "Attempting to install sudo"
+    
+    case "$PACKAGE_MANAGER" in
+        "dnf"|"yum")
+            execute_command "$PACKAGE_MANAGER install -y sudo" "Install sudo via $PACKAGE_MANAGER"
+            ;;
+        "apt"|"apt-get")
+            execute_command "$PACKAGE_MANAGER update && $PACKAGE_MANAGER install -y sudo" "Install sudo via $PACKAGE_MANAGER"
+            ;;
+        "zypper")
+            execute_command "zypper install -y sudo" "Install sudo via zypper"
+            ;;
+        "pacman")
+            execute_command "pacman -S --noconfirm sudo" "Install sudo via pacman"
+            ;;
+        "apk")
+            execute_command "apk add sudo" "Install sudo via apk"
+            ;;
+        *)
+            log "WARN" "Unknown package manager, cannot install sudo automatically"
+            ;;
+    esac
+}
+
+# Validation function for input parameters
+validate_parameters() {
+    local username="$1"
+    local ssh_key="$2"
+    local group="$3"
+    local shell="$4"
+    
+    # Validate username
+    if [[ ! "$username" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+        log "ERROR" "Invalid username format: $username"
+        log "ERROR" "Username must start with lowercase letter or underscore, followed by lowercase letters, numbers, underscores, or hyphens"
+        exit 1
+    fi
+    
+    if [[ ${#username} -gt 32 ]]; then
+        log "ERROR" "Username too long: $username (max 32 characters)"
+        exit 1
+    fi
+    
+    # Validate group name
+    if [[ ! "$group" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+        log "ERROR" "Invalid group name format: $group"
+        exit 1
+    fi
+    
+    # Validate shell
+    if [[ ! -x "$shell" ]]; then
+        log "WARN" "Shell $shell does not exist or is not executable"
+    fi
+    
+    # Validate SSH key format
+    validate_ssh_key "$ssh_key"
+}
+
+# Summary function
+print_summary() {
+    local username="$1"
+    local group="$2"
+    local shell="$3"
+    local no_sudo="$4"
+    
+    log "INFO" "=== CONFIGURATION SUMMARY ==="
+    log "INFO" "User: $username"
+    log "INFO" "Primary Group: $group"
+    log "INFO" "Shell: $shell"
+    log "INFO" "Sudo Access: $(if [[ "$no_sudo" == "true" ]]; then echo "Disabled"; else echo "Enabled"; fi)"
+    log "INFO" "Distribution: $DISTRO ($DISTRO_FAMILY) $VERSION_ID"
+    log "INFO" "Package Manager: $PACKAGE_MANAGER"
+    log "INFO" "Log File: $LOG_FILE"
+    log "INFO" "============================"
+}
+
+# Main execution function
 main() {
-    # Parse arguments
+    # Initialize variables
     USERNAME=""
     SSH_KEY=""
     GROUP=""
     SHELL="/bin/bash"
     NO_SUDO="false"
+    DRY_RUN="false"
     
+    # Parse command line arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
             -h|--help)
@@ -284,21 +651,38 @@ main() {
                 NO_SUDO="true"
                 shift
                 ;;
+            -d|--debug)
+                DEBUG="true"
+                shift
+                ;;
+            --dry-run)
+                DRY_RUN="true"
+                shift
+                ;;
             *)
-                log "ERROR: Unknown parameter: $1"
+                log "ERROR" "Unknown parameter: $1"
                 show_help
                 ;;
         esac
     done
     
+    # Initialize logging
+    touch "$LOG_FILE" 2>/dev/null || {
+        echo "Warning: Cannot write to log file $LOG_FILE, using /tmp/ansible_user_setup.log"
+        LOG_FILE="/tmp/ansible_user_setup.log"
+        touch "$LOG_FILE"
+    }
+    
+    log "INFO" "Starting Ansible User Setup Script v$VERSION"
+    
     # Validate required parameters
     if [[ -z "$USERNAME" ]]; then
-        log "ERROR: Username is required"
+        log "ERROR" "Username is required (use --user)"
         show_help
     fi
     
     if [[ -z "$SSH_KEY" ]]; then
-        log "ERROR: SSH public key is required"
+        log "ERROR" "SSH public key is required (use --key)"
         show_help
     fi
     
@@ -310,22 +694,38 @@ main() {
     # Check if running as root
     check_root
     
-    # Detect Linux distribution
+    # Detect Linux distribution and package manager
     detect_distro
     
-    log "Starting setup for Ansible user $USERNAME"
+    # Validate all parameters
+    validate_parameters "$USERNAME" "$SSH_KEY" "$GROUP" "$SHELL"
     
-    # Create user
+    # Print configuration summary
+    print_summary "$USERNAME" "$GROUP" "$SHELL" "$NO_SUDO"
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "INFO" "=== DRY RUN MODE - NO CHANGES WILL BE MADE ==="
+    fi
+    
+    log "INFO" "Starting user setup process for: $USERNAME"
+    
+    # Create user account
     create_user "$USERNAME" "$GROUP" "$SHELL"
     
-    # Setup SSH key
+    # Setup SSH key authentication
     setup_ssh_key "$USERNAME" "$SSH_KEY"
     
-    # Configure sudo
+    # Configure sudo access
     configure_sudo "$USERNAME" "$NO_SUDO"
     
-    log "Setup completed successfully for user $USERNAME"
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "INFO" "=== DRY RUN COMPLETED - NO ACTUAL CHANGES MADE ==="
+    else
+        log "INFO" "User setup completed successfully for: $USERNAME"
+    fi
+    
+    log "INFO" "Script execution completed"
 }
 
-# Execute main function
+# Execute main function with all arguments
 main "$@"
