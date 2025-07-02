@@ -3,7 +3,7 @@
 # Ansible/AWX Project Structure Initialization Script
 # Creates a complete project structure following Ansible best practices
 # Author: Ansible Expert
-# Version: 3.0
+# Version: 3.1
 
 set -euo pipefail
 
@@ -47,15 +47,34 @@ create_dir_with_placeholder() {
     print_message "$GREEN" "✓ Created: $dir_path"
 }
 
-# Function to create file from template
+# Function to create file from template with copy protection
 create_file_from_template() {
     local template_file=$1
     local target_file=$2
     local project_name=$3
+    local copy_templates=$4
+    
+    if [[ "$copy_templates" == false ]]; then
+        print_message "$BLUE" "⏭ Skipped template: $target_file (--copy-templates not specified)"
+        return 0
+    fi
     
     if [[ -f "$TEMPLATES_DIR/$template_file" ]]; then
+        local target_path="$PROJECT_ROOT/$target_file"
+        
+        # Check if target file already exists
+        if [[ -f "$target_path" ]]; then
+            print_message "$YELLOW" "⚠ Target file already exists: $target_file (not overwritten)"
+            return 0
+        fi
+        
+        # Create target directory if it doesn't exist
+        local target_dir
+        target_dir=$(dirname "$target_path")
+        mkdir -p "$target_dir"
+        
         # Replace PROJECT_NAME placeholder with actual project name
-        sed "s/PROJECT_NAME/$project_name/g" "$TEMPLATES_DIR/$template_file" > "$PROJECT_ROOT/$target_file"
+        sed "s/PROJECT_NAME/$project_name/g" "$TEMPLATES_DIR/$template_file" > "$target_path"
         print_message "$BLUE" "✓ Created file: $target_file (from template: $template_file)"
     else
         print_message "$RED" "WARNING: Template file not found: $TEMPLATES_DIR/$template_file"
@@ -67,7 +86,27 @@ create_file_from_template() {
 create_basic_file() {
     local file_path=$1
     local content=$2
-    echo "$content" > "$PROJECT_ROOT/$file_path"
+    local copy_templates=$3
+    
+    if [[ "$copy_templates" == false ]]; then
+        print_message "$BLUE" "⏭ Skipped basic file: $file_path (--copy-templates not specified)"
+        return 0
+    fi
+    
+    local target_path="$PROJECT_ROOT/$file_path"
+    
+    # Check if target file already exists
+    if [[ -f "$target_path" ]]; then
+        print_message "$YELLOW" "⚠ Target file already exists: $file_path (not overwritten)"
+        return 0
+    fi
+    
+    # Create target directory if it doesn't exist
+    local target_dir
+    target_dir=$(dirname "$target_path")
+    mkdir -p "$target_dir"
+    
+    echo "$content" > "$target_path"
     print_message "$BLUE" "✓ Created file: $file_path"
 }
 
@@ -139,46 +178,69 @@ create_directory_structure() {
 # Function to create configuration files
 create_configuration_files() {
     local project_name=$1
-    print_message "$YELLOW" "Creating configuration files..."
+    local copy_templates=$2
+    
+    if [[ "$copy_templates" == true ]]; then
+        print_message "$YELLOW" "Creating configuration files from templates..."
+    else
+        print_message "$YELLOW" "Skipping configuration files (--copy-templates not specified)..."
+        return 0
+    fi
     
     # Create files from templates
-    create_file_from_template "ansible.cfg.tpl" "ansible.cfg" "$project_name"
-    create_file_from_template "requirements.yml.tpl" "requirements.yml" "$project_name"
-    create_file_from_template "gitignore.tpl" ".gitignore" "$project_name"
-    create_file_from_template "README.md.tpl" "README.md" "$project_name"
-    create_file_from_template "CONTRIBUTING.md.tpl" "CONTRIBUTING.md" "$project_name"
-    create_file_from_template "site.yml.tpl" "site.yml" "$project_name"
+    create_file_from_template "ansible.cfg.tpl" "ansible.cfg" "$project_name" "$copy_templates"
+    create_file_from_template "requirements.yml.tpl" "requirements.yml" "$project_name" "$copy_templates"
+    create_file_from_template "gitignore.tpl" ".gitignore" "$project_name" "$copy_templates"
+    create_file_from_template "README.md.tpl" "README.md" "$project_name" "$copy_templates"
+    create_file_from_template "CONTRIBUTING.md.tpl" "CONTRIBUTING.md" "$project_name" "$copy_templates"
+    create_file_from_template "site.yml.tpl" "site.yml" "$project_name" "$copy_templates"
     
     # Inventory files
-    create_file_from_template "hosts.yml.tpl" "inventory/development/hosts.yml" "$project_name"
+    create_file_from_template "hosts.yml.tpl" "inventory/development/hosts.yml" "$project_name" "$copy_templates"
     
     # Group vars
-    create_file_from_template "group_vars_all.yml.tpl" "group_vars/all/main.yml" "$project_name"
+    create_file_from_template "group_vars_all.yml.tpl" "group_vars/all/main.yml" "$project_name" "$copy_templates"
     
     # AWX job template
-    create_file_from_template "awx_job_template.yml.tpl" "awx/job_templates/deploy-application.yml" "$project_name"
+    create_file_from_template "awx_job_template.yml.tpl" "awx/job_templates/deploy-application.yml" "$project_name" "$copy_templates"
     
     # Molecule configuration
-    create_file_from_template "molecule.yml.tpl" "molecule/default/molecule.yml" "$project_name"
+    create_file_from_template "molecule.yml.tpl" "molecule/default/molecule.yml" "$project_name" "$copy_templates"
 }
 
 # Function to create sample role
 create_sample_role() {
     local project_name=$1
+    local copy_templates=$2
+    
     print_message "$YELLOW" "Creating sample role structure..."
     
     # Create role directories
     mkdir -p "$PROJECT_ROOT/roles/sample-role"/{tasks,handlers,templates,files,vars,defaults,meta,tests}
     
-    # Create role files from templates
-    create_file_from_template "role_tasks_main.yml.tpl" "roles/sample-role/tasks/main.yml" "$project_name"
-    create_file_from_template "role_meta_main.yml.tpl" "roles/sample-role/meta/main.yml" "$project_name"
-    
-    # Create basic role files
-    create_basic_file "roles/sample-role/defaults/main.yml" "---\n# Default variables for sample-role"
-    create_basic_file "roles/sample-role/vars/main.yml" "---\n# Variables for sample-role"
-    create_basic_file "roles/sample-role/handlers/main.yml" "---\n# Handlers for sample-role"
-    create_basic_file "roles/sample-role/tests/test.yml" "---\n- hosts: localhost\n  remote_user: root\n  roles:\n    - sample-role"
+    if [[ "$copy_templates" == true ]]; then
+        # Create role files from templates
+        create_file_from_template "role_tasks_main.yml.tpl" "roles/sample-role/tasks/main.yml" "$project_name" "$copy_templates"
+        create_file_from_template "role_meta_main.yml.tpl" "roles/sample-role/meta/main.yml" "$project_name" "$copy_templates"
+        
+        # Create basic role files
+        create_basic_file "roles/sample-role/defaults/main.yml" "---\n# Default variables for sample-role" "$copy_templates"
+        create_basic_file "roles/sample-role/vars/main.yml" "---\n# Variables for sample-role" "$copy_templates"
+        create_basic_file "roles/sample-role/handlers/main.yml" "---\n# Handlers for sample-role" "$copy_templates"
+        create_basic_file "roles/sample-role/tests/test.yml" "---\n- hosts: localhost\n  remote_user: root\n  roles:\n    - sample-role" "$copy_templates"
+    else
+        print_message "$BLUE" "⏭ Sample role files skipped (--copy-templates not specified)"
+        
+        # Still create placeholder files to maintain directory structure
+        touch "$PROJECT_ROOT/roles/sample-role/tasks/.donotdelete"
+        touch "$PROJECT_ROOT/roles/sample-role/handlers/.donotdelete"
+        touch "$PROJECT_ROOT/roles/sample-role/templates/.donotdelete"
+        touch "$PROJECT_ROOT/roles/sample-role/files/.donotdelete"
+        touch "$PROJECT_ROOT/roles/sample-role/vars/.donotdelete"
+        touch "$PROJECT_ROOT/roles/sample-role/defaults/.donotdelete"
+        touch "$PROJECT_ROOT/roles/sample-role/meta/.donotdelete"
+        touch "$PROJECT_ROOT/roles/sample-role/tests/.donotdelete"
+    fi
 }
 
 # Function to check prerequisites
@@ -205,15 +267,22 @@ print_usage() {
     echo "  -h, --help              Show this help message"
     echo "  -v, --verbose           Enable verbose output"
     echo "  -t, --create-templates  Create template files with basic content"
+    echo "  -c, --copy-templates    Copy template files to target locations"
     echo ""
     echo "Description:"
     echo "  Creates a complete Ansible project structure following best practices"
     echo "  Templates directory should be located at: $TEMPLATES_DIR"
     echo ""
+    echo "Template behavior:"
+    echo "  By default, only directory structure is created"
+    echo "  Use --copy-templates to copy template files to their destinations"
+    echo "  Existing files are never overwritten for safety"
+    echo ""
     echo "Examples:"
-    echo "  $0                      # Create project structure using existing templates"
-    echo "  $0 --create-templates   # Create template files first, then project structure"
-    echo "  $0 -t -v               # Create templates with verbose output"
+    echo "  $0                      # Create project structure only (no template files)"
+    echo "  $0 --copy-templates     # Create structure and copy template files"
+    echo "  $0 --create-templates   # Create empty template files first"
+    echo "  $0 -c -v               # Copy templates with verbose output"
 }
 
 # Function to create templates directory if it doesn't exist
@@ -252,8 +321,12 @@ create_template_files() {
     
     # Create empty template files
     for template_file in "${template_files[@]}"; do
-        touch "$TEMPLATES_DIR/$template_file"
-        print_message "$GREEN" "✓ Created empty template: $template_file"
+        if [[ ! -f "$TEMPLATES_DIR/$template_file" ]]; then
+            touch "$TEMPLATES_DIR/$template_file"
+            print_message "$GREEN" "✓ Created empty template: $template_file"
+        else
+            print_message "$YELLOW" "⚠ Template already exists: $template_file"
+        fi
     done
     
     echo ""
@@ -264,8 +337,16 @@ create_template_files() {
     echo ""
 }
 
-# Function to validate template files content
+# Function to validate template files content (only when copying templates)
 validate_template_files() {
+    local copy_templates=$1
+    
+    # Skip validation if not copying templates
+    if [[ "$copy_templates" == false ]]; then
+        print_message "$BLUE" "⏭ Skipping template validation (--copy-templates not specified)"
+        return 0
+    fi
+    
     print_message "$YELLOW" "Validating template files..."
     
     local template_files=(
@@ -326,6 +407,7 @@ validate_template_files() {
 main() {
     local verbose=false
     local create_templates=false
+    local copy_templates=false
     
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
@@ -342,6 +424,10 @@ main() {
                 create_templates=true
                 shift
                 ;;
+            -c|--copy-templates)
+                copy_templates=true
+                shift
+                ;;
             *)
                 print_message "$RED" "Unknown option: $1"
                 print_usage
@@ -353,6 +439,7 @@ main() {
     print_message "$YELLOW" "=== Ansible/AWX Project Structure Generator ==="
     print_message "$YELLOW" "Project location: $PROJECT_ROOT"
     print_message "$YELLOW" "Templates location: $TEMPLATES_DIR"
+    print_message "$BLUE" "Copy templates: $copy_templates"
     echo ""
     
     # Check prerequisites
@@ -364,11 +451,12 @@ main() {
         exit 0
     fi
     
-    # Create templates directory if needed
-    create_templates_directory
-    
-    # Validate template files
-    validate_template_files
+    # Create templates directory if needed and copying templates
+    if [[ "$copy_templates" == true ]]; then
+        create_templates_directory
+        # Validate template files only if copying
+        validate_template_files "$copy_templates"
+    fi
     
     # Get project name from directory
     local project_name
@@ -376,21 +464,32 @@ main() {
     
     # Create structure
     create_directory_structure
-    create_configuration_files "$project_name"
-    create_sample_role "$project_name"
+    create_configuration_files "$project_name" "$copy_templates"
+    create_sample_role "$project_name" "$copy_templates"
     
     # Final messages
     echo ""
     print_message "$GREEN" "=== Project structure created successfully! ==="
     print_message "$YELLOW" "Project name: $project_name"
     print_message "$YELLOW" "Project location: $PROJECT_ROOT"
+    print_message "$BLUE" "Templates copied: $copy_templates"
     echo ""
-    print_message "$BLUE" "Next steps:"
-    echo "  1. cd $PROJECT_ROOT"
-    echo "  2. Initialize git (if not already done): git init"
-    echo "  3. Install requirements: ansible-galaxy install -r requirements.yml"
-    echo "  4. Configure inventory files for your environments"
-    echo "  5. Start creating your playbooks and roles"
+    
+    if [[ "$copy_templates" == true ]]; then
+        print_message "$BLUE" "Next steps:"
+        echo "  1. cd $PROJECT_ROOT"
+        echo "  2. Initialize git (if not already done): git init"
+        echo "  3. Install requirements: ansible-galaxy install -r requirements.yml"
+        echo "  4. Configure inventory files for your environments"
+        echo "  5. Start creating your playbooks and roles"
+    else
+        print_message "$BLUE" "Next steps:"
+        echo "  1. cd $PROJECT_ROOT"
+        echo "  2. Populate template files in: $TEMPLATES_DIR"
+        echo "  3. Run again with --copy-templates to copy configuration files"
+        echo "  4. Or manually create your configuration files"
+    fi
+    
     echo ""
     print_message "$GREEN" "Happy automating with Ansible! 🚀"
 }
